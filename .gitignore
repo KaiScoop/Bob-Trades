@@ -1,0 +1,33 @@
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# JavaScript / Expo
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Frontend is a separately initialized Git repository
+/frontend/
+
+# macOS and editor artifacts
+.DS_Store
+.idea/
