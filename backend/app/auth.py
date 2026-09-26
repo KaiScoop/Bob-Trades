@@ -12,6 +12,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 class AuthenticatedUser(BaseModel):
     id: str
     email: str | None = None
+    token: str | None = None
 
 
 async def get_authenticated_user(
@@ -47,6 +48,10 @@ async def get_authenticated_user(
 
     try:
         user = response.json()
-        return AuthenticatedUser(id=user["id"], email=user.get("email"))
+        return AuthenticatedUser(
+            id=user["id"],
+            email=user.get("email"),
+            token=credentials.credentials,
+        )
     except (KeyError, TypeError, ValueError) as error:
         raise HTTPException(status_code=503, detail="Invalid Supabase Auth response") from error
