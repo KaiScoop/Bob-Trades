@@ -1,6 +1,9 @@
 import httpx
+from fastapi.testclient import TestClient
 
+from app import main
 from common import health
+from worker import main as worker_main
 
 
 def test_health_checks_supabase_and_upstash(monkeypatch):
@@ -27,7 +30,7 @@ def test_health_checks_supabase_and_upstash(monkeypatch):
         "upstash_redis": True,
     }
     assert requests[0][1] == "https://project.supabase.co/auth/v1/health"
-    assert requests[1][1] == "https://project.supabase.co/rest/v1/"
+    assert requests[1][1] == "https://project.supabase.co/rest/v1/profiles?select=user_id&limit=0"
     assert requests[2][2]["json"] == ["PING"]
     assert requests[2][2]["headers"]["Authorization"] == "Bearer test-token"
 
@@ -46,3 +49,31 @@ def test_health_marks_unconfigured_services_unavailable(monkeypatch):
         "supabase_database": False,
         "upstash_redis": False,
     }
+
+
+def test_health_endpoint_reports_degraded_dependencies(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "check_dependencies",
+        lambda: {"supabase_auth": False, "supabase_database": False, "upstash_redis": False},
+    )
+
+    response = TestClient(main.app).get("/health")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+
+
+def test_worker_health_endpoint(monkeypatch):
+    monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
+    monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
+    monkeypatch.setattr(
+        worker_main,
+        "check_dependencies",
+        lambda: {"supabase_auth": True, "supabase_database": True, "upstash_redis": True},
+    )
+
+    response = TestClient(worker_main.app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["service"] == "worker"
