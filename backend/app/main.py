@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+import ccxt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
@@ -15,8 +16,10 @@ from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser, get_authenticated_user
 from common import config
+from common.bybit_execution import BybitSpotExecution, ExecutionBlocked
 from common.health import check_dependencies
-from common.market_data import SUPPORTED_SYMBOLS, get_cached_json
+from common.market_data import SUPPORTED_SYMBOLS, delete_cached_json, get_cached_json, set_cached_json
+from worker.decision import RISK_ALIASES, _mainnet_block_reason
 
 app = FastAPI(title="Bob Trades API", version="0.1.0")
 
@@ -41,7 +44,8 @@ class ProfilePatchRequest(BaseModel):
 class AgentStartRequest(BaseModel):
     symbol: str
     risk: str = "medium"
-    max_position_pct: float = 0.2
+    max_position_pct: float = Field(default=0.2, gt=0, le=1)
+    arm_live: bool = False
 
 
 class TpslUpdateRequest(BaseModel):
@@ -150,6 +154,10 @@ def create_bybit_client(mode: str, api_key: str, api_secret: str) -> BybitClient
     if not api_key or not api_secret:
         raise ValueError("api_key and api_secret are required")
     return BybitClient(mode=mode, api_key=api_key, api_secret=api_secret)
+
+
+def create_bybit_execution(mode: str, api_key: str, api_secret: str) -> BybitSpotExecution:
+    return BybitSpotExecution(api_key=api_key, api_secret=api_secret, mode=mode)
 
 
 def _market_cache(key: str) -> Any:
@@ -302,6 +310,38 @@ def _load_broker_connection(user: AuthenticatedUser) -> dict[str, Any] | None:
     return rows[0]
 
 
+def _portfolio_cache(user_id: str, mode: str) -> dict[str, Any] | None:
+    try:
+        cached = get_cached_json(f"user:{user_id}:portfolio")
+    except (httpx.HTTPError, KeyError, RuntimeError, ValueError):
+        return None
+    if not isinstance(cached, dict) or cached.get("mode") != mode:
+        return None
+    age_ms = int(time.time() * 1000) - int(cached.get("fetched_at", 0))
+    return cached if 0 <= age_ms <= 10_000 else None
+
+
+def _cache_portfolio(user_id: str, mode: str, balance: dict[str, Any], holdings: dict[str, Any] | None = None) -> None:
+    try:
+        set_cached_json(
+            f"user:{user_id}:portfolio",
+            {"mode": mode, "balance": balance, "holdings": holdings or {}, "fetched_at": int(time.time() * 1000)},
+            10,
+        )
+    except (httpx.HTTPError, RuntimeError, ValueError):
+        return
+
+
+def _cached_usdt_free(snapshot: dict[str, Any]) -> float:
+    return float((snapshot.get("balance", {}).get("USDT") or {}).get("free") or 0.0)
+
+
+def _refresh_portfolio(user: AuthenticatedUser, mode: str, broker: BybitSpotExecution, symbol: str) -> None:
+    balance = broker.fetch_balance()
+    holdings = broker.fetch_holdings(symbol)
+    _cache_portfolio(user.id, mode, balance, {symbol: holdings})
+
+
 @app.get("/me")
 def get_me(user: AuthenticatedUser = Depends(get_authenticated_user)) -> dict[str, Any]:
     response = _supabase_request(
@@ -381,6 +421,7 @@ def connect_bybit(
             "status": "connected",
         },
     )
+    _cache_portfolio(user.id, request.mode, balance)
     return {
         "status": "connected",
         "mode": request.mode,
@@ -398,7 +439,7 @@ def broker_status(
     return {
         "connected": True,
         "mode": connection["mode"],
-        "balance": 0.0,
+        "balance": _cached_usdt_free(_portfolio_cache(user.id, connection["mode"]) or {}),
     }
 
 
@@ -410,6 +451,14 @@ def portfolio(
     if connection is None:
         raise HTTPException(status_code=404, detail="No Bybit connection found")
 
+    cached = _portfolio_cache(user.id, connection["mode"])
+    if cached is not None:
+        return {
+            "mode": connection["mode"],
+            "balance": _cached_usdt_free(cached),
+            "asset": "USDT",
+        }
+
     client = create_bybit_client(
         connection["mode"],
         _decrypt_broker_secret(connection["key_enc"]),
@@ -419,6 +468,7 @@ def portfolio(
         balance = client.fetch_balance()
     except (httpx.HTTPError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail="Bybit balance request failed") from error
+    _cache_portfolio(user.id, connection["mode"], balance)
     return {
         "mode": connection["mode"],
         "balance": float(balance.get("USDT", {}).get("free", 0.0) or 0.0),
@@ -459,17 +509,74 @@ def start_agent(
     request: AgentStartRequest,
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> dict[str, Any]:
-    _get_user_client(user)
-    _ensure_symbol(request.symbol)
-    raise HTTPException(status_code=503, detail="Trading worker is not configured")
+    if os.getenv("TRADING_WORKER_ENABLED", "false").lower() not in {"1", "true"}:
+        raise HTTPException(status_code=503, detail="Trading worker is disabled")
+    symbol = _ensure_symbol(request.symbol)
+    risk_profile = RISK_ALIASES.get(request.risk.lower())
+    if risk_profile is None:
+        raise HTTPException(status_code=422, detail="Unsupported risk profile")
+    connection = _load_broker_connection(user)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="No Bybit connection found")
+    armed = connection["mode"] == "testnet"
+    if connection["mode"] == "mainnet":
+        if not request.arm_live:
+            raise HTTPException(status_code=403, detail="Mainnet requires explicit arm_live confirmation")
+        reason = _mainnet_block_reason(symbol, risk_profile)
+        if reason:
+            raise HTTPException(status_code=403, detail=reason)
+        armed = True
+
+    _supabase_request(
+        user,
+        "POST",
+        "agent_settings?on_conflict=user_id",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        json={
+            "user_id": user.id,
+            "symbol": symbol,
+            "risk_profile": risk_profile,
+            "max_position_pct": request.max_position_pct,
+            "agent_on": True,
+            "armed": armed,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {
+        "status": "started",
+        "symbol": symbol,
+        "risk": risk_profile,
+        "max_position_pct": request.max_position_pct,
+        "mode": connection["mode"],
+        "armed": armed,
+    }
 
 
 @app.post("/agent/stop")
 def stop_agent(
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> dict[str, Any]:
-    _get_user_client(user)
-    raise HTTPException(status_code=503, detail="Trading worker is not configured")
+    _supabase_request(
+        user,
+        "POST",
+        "agent_settings?on_conflict=user_id",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        json={
+            "user_id": user.id,
+            "agent_on": False,
+            "armed": False,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return {"status": "stopped"}
 
 
 @app.get("/agent/logs")
@@ -489,6 +596,21 @@ def get_agent_logs(
     return {"logs": logs}
 
 
+@app.post("/agent/kill-switch")
+def activate_kill_switch(
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, Any]:
+    admins = {value.strip() for value in os.getenv("TRADING_ADMIN_USER_IDS", "").split(",") if value.strip()}
+    if user.id not in admins:
+        raise HTTPException(status_code=403, detail="User is not authorized to arm the global kill switch")
+    set_cached_json(
+        "kill:trading",
+        {"active": True, "reason": "admin_requested", "user_id": user.id, "armed_at": int(time.time() * 1000)},
+        7 * 86_400,
+    )
+    return {"active": True, "expires_in_seconds": 7 * 86_400}
+
+
 @app.post("/positions/{symbol}/close")
 def close_position(
     symbol: str,
@@ -496,14 +618,23 @@ def close_position(
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> dict[str, Any]:
     normalized = _ensure_symbol(symbol)
-    client = _get_user_client(user)
-    close_method = getattr(client, "close_position", None)
-    if close_method is None:
-        raise HTTPException(status_code=501, detail="Spot position closing is not implemented")
     try:
-        result = close_method(normalized)
-    except NotImplementedError as error:
-        raise HTTPException(status_code=501, detail=str(error)) from error
+        connection = _load_broker_connection(user)
+        if connection is None:
+            raise HTTPException(status_code=404, detail="No Bybit connection found")
+        broker = create_bybit_execution(
+            connection["mode"],
+            _decrypt_broker_secret(connection["key_enc"]),
+            _decrypt_broker_secret(connection["secret_enc"]),
+        )
+        result = broker.close_position(normalized)
+        _refresh_portfolio(user, connection["mode"], broker, normalized)
+    except ExecutionBlocked as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except HTTPException:
+        raise
+    except (ccxt.BaseError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail="Bybit position close failed") from error
     return {"status": "closed", "symbol": normalized, "result": result}
 
 
@@ -514,14 +645,23 @@ def update_position_tpsl(
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> dict[str, Any]:
     normalized = _ensure_symbol(symbol)
-    client = _get_user_client(user)
-    update_method = getattr(client, "update_tpsl", None)
-    if update_method is None:
-        raise HTTPException(status_code=501, detail="Spot TP/SL updates are not implemented")
     try:
-        result = update_method(normalized, float(body.tp), float(body.sl))
-    except NotImplementedError as error:
-        raise HTTPException(status_code=501, detail=str(error)) from error
+        connection = _load_broker_connection(user)
+        if connection is None:
+            raise HTTPException(status_code=404, detail="No Bybit connection found")
+        broker = create_bybit_execution(
+            connection["mode"],
+            _decrypt_broker_secret(connection["key_enc"]),
+            _decrypt_broker_secret(connection["secret_enc"]),
+        )
+        result = broker.update_tp_sl(normalized, float(body.tp), float(body.sl))
+        _refresh_portfolio(user, connection["mode"], broker, normalized)
+    except ExecutionBlocked as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    except HTTPException:
+        raise
+    except (ccxt.BaseError, RuntimeError, ValueError) as error:
+        raise HTTPException(status_code=502, detail="Bybit TP/SL update failed") from error
     return {"status": "updated", "symbol": normalized, "tp": float(body.tp), "sl": float(body.sl), "result": result}
 
 
@@ -531,8 +671,22 @@ def disconnect_bybit(
 ) -> dict[str, bool]:
     _supabase_request(
         user,
+        "POST",
+        "agent_settings?on_conflict=user_id",
+        headers={
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        json={"user_id": user.id, "agent_on": False, "armed": False},
+    )
+    _supabase_request(
+        user,
         "DELETE",
         f"broker_connections?user_id=eq.{user.id}&venue=eq.bybit",
         headers={"Prefer": "return=minimal"},
     )
+    try:
+        delete_cached_json(f"user:{user.id}:portfolio")
+    except (httpx.HTTPError, RuntimeError):
+        pass
     return {"deleted": True}
