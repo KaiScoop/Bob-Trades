@@ -52,13 +52,13 @@ def stub_market_cache(monkeypatch):
 
 def stub_supabase_storage(monkeypatch):
     monkeypatch.setenv("BROKER_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
-    rows = []
+    tables = {}
     requests = []
 
     def fake_request(method, url, **kwargs):
         requests.append((method, url, kwargs))
-        if "/agent_logs?" in url:
-            return httpx.Response(200, json=[])
+        table = url.split("/rest/v1/", 1)[1].split("?", 1)[0]
+        rows = tables.setdefault(table, [])
         if method == "POST":
             rows[:] = [kwargs["json"]]
             return httpx.Response(201, json=rows)
@@ -70,7 +70,7 @@ def stub_supabase_storage(monkeypatch):
         return httpx.Response(200, json=[])
 
     monkeypatch.setattr("app.main.httpx.request", fake_request)
-    return rows, requests
+    return tables, requests
 
 
 def test_market_candles_endpoint_returns_symbol_and_tf(monkeypatch):
@@ -119,7 +119,7 @@ def test_market_stream_is_sse(monkeypatch):
 
 
 def test_broker_connect_and_portfolio(monkeypatch):
-    stored_rows, storage_requests = stub_supabase_storage(monkeypatch)
+    storage_tables, storage_requests = stub_supabase_storage(monkeypatch)
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
     monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
     monkeypatch.setattr(
@@ -154,8 +154,9 @@ def test_broker_connect_and_portfolio(monkeypatch):
 
     assert connect_response.status_code == 200
     assert connect_response.json()["status"] == "connected"
-    assert stored_rows[0]["key_enc"] != "demo-key"
-    assert stored_rows[0]["secret_enc"] != "demo-secret"
+    stored_row = storage_tables["broker_connections"][0]
+    assert stored_row["key_enc"] != "demo-key"
+    assert stored_row["secret_enc"] != "demo-secret"
     assert storage_requests[0][2]["headers"]["Authorization"] == "Bearer user-access-token"
 
     portfolio_response = TestClient(app).get(
@@ -277,6 +278,95 @@ def test_profile_endpoints_fail_cleanly_when_supabase_is_not_configured(monkeypa
     assert patch_response.status_code == 503
 
 
+def test_testnet_agent_start_and_stop_persist_settings(monkeypatch):
+    storage_tables, _requests = stub_supabase_storage(monkeypatch)
+    monkeypatch.setenv("TRADING_WORKER_ENABLED", "true")
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-start", "email": "start@example.com"})),
+    )
+
+    class FakeBybitClient:
+        def __init__(self, api_key, api_secret, mode):
+            self.api_key = api_key
+            self.api_secret = api_secret
+            self.mode = mode
+
+        def fetch_balance(self):
+            return {"USDT": {"free": 100.0}}
+
+    monkeypatch.setattr(
+        "app.main.create_bybit_client",
+        lambda mode, api_key, api_secret: FakeBybitClient(api_key, api_secret, mode),
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer user-access-token"}
+    assert client.post(
+        "/broker/bybit",
+        headers=headers,
+        json={"mode": "testnet", "api_key": "agent-key", "api_secret": "agent-secret"},
+    ).status_code == 200
+
+    start = client.post(
+        "/agent/start",
+        headers=headers,
+        json={"symbol": "BTCUSDT", "risk": "medium", "max_position_pct": 0.2},
+    )
+    assert start.status_code == 200
+    assert start.json()["armed"] is True
+    assert storage_tables["agent_settings"][0]["agent_on"] is True
+    assert storage_tables["agent_settings"][0]["risk_profile"] == "balanced"
+
+    stop = client.post("/agent/stop", headers=headers)
+    assert stop.status_code == 200
+    assert storage_tables["agent_settings"][0]["agent_on"] is False
+    assert storage_tables["agent_settings"][0]["armed"] is False
+
+
+def test_global_kill_switch_requires_admin_and_arms_upstash(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("TRADING_ADMIN_USER_IDS", "user-kill-admin")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-kill-admin", "email": "admin@example.com"})),
+    )
+    writes = []
+    monkeypatch.setattr("app.main.set_cached_json", lambda *args: writes.append(args))
+
+    response = TestClient(app).post(
+        "/agent/kill-switch",
+        headers={"Authorization": "Bearer user-access-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["active"] is True
+    assert writes[0][0] == "kill:trading"
+    assert writes[0][1]["active"] is True
+
+
+def test_global_kill_switch_rejects_non_admin(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("TRADING_ADMIN_USER_IDS", "other-user")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "regular-user", "email": "user@example.com"})),
+    )
+
+    response = TestClient(app).post(
+        "/agent/kill-switch",
+        headers={"Authorization": "Bearer user-access-token"},
+    )
+
+    assert response.status_code == 403
+
+
 def test_session_validates_bearer_with_supabase(monkeypatch):
     stub_client = StubAuthClient(
         httpx.Response(200, json={"id": "user-123", "email": "user@example.com"})
@@ -342,6 +432,21 @@ def test_agent_and_position_lifecycle(monkeypatch):
 
     monkeypatch.setattr("app.main.create_bybit_client", lambda mode, api_key, api_secret: FakeBybitClient(api_key, api_secret, mode))
 
+    class FakeExecution:
+        def fetch_balance(self):
+            return {"USDT": {"free": 100.0, "total": 100.0}}
+
+        def fetch_holdings(self, _symbol):
+            return {"free": 0.0, "total": 0.0}
+
+        def close_position(self, symbol):
+            return {"symbol": symbol, "closed": True}
+
+        def update_tp_sl(self, symbol, tp, sl):
+            return {"symbol": symbol, "tp": tp, "sl": sl}
+
+    monkeypatch.setattr("app.main.create_bybit_execution", lambda *_args: FakeExecution())
+
     client = TestClient(app)
 
     connect = client.post(
@@ -371,21 +476,22 @@ def test_agent_and_position_lifecycle(monkeypatch):
         headers={"Authorization": "Bearer user-access-token"},
         json={},
     )
-    assert close.status_code == 501
+    assert close.status_code == 200
 
     tpsl = client.post(
         "/positions/BTCUSDT/tpsl",
         headers={"Authorization": "Bearer user-access-token"},
         json={"tp": 64000.0, "sl": 60000.0},
     )
-    assert tpsl.status_code == 501
+    assert tpsl.status_code == 200
 
     logs = client.get("/agent/logs", headers={"Authorization": "Bearer user-access-token"})
     assert logs.status_code == 200
     assert logs.json()["logs"] == []
 
     stop = client.post("/agent/stop", headers={"Authorization": "Bearer user-access-token"})
-    assert stop.status_code == 503
+    assert stop.status_code == 200
+    assert stop.json()["status"] == "stopped"
 
     deleted = client.delete("/broker/bybit", headers={"Authorization": "Bearer user-access-token"})
     assert deleted.status_code == 200
