@@ -14,7 +14,7 @@ def check_dependencies() -> dict[str, bool]:
     if supabase_url and publishable_key:
         for dependency, path in (
             ("supabase_auth", "/auth/v1/health"),
-            ("supabase_database", "/rest/v1/"),
+            ("supabase_database", "/rest/v1/profiles?select=user_id&limit=0"),
         ):
             try:
                 response = httpx.get(
