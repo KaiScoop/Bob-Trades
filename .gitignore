@@ -25,9 +25,6 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# Frontend is a separately initialized Git repository
-/frontend/
-
 # macOS and editor artifacts
 .DS_Store
 .idea/
