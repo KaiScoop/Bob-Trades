@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -10,8 +11,8 @@ from urllib.parse import urlencode
 import httpx
 import ccxt
 from cryptography.fernet import Fernet, InvalidToken
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
-from fastapi.responses import StreamingResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser, get_authenticated_user
@@ -34,6 +35,14 @@ class BybitConnectRequest(BaseModel):
     mode: str = Field(default="testnet")
     api_key: str
     api_secret: str
+
+
+class AuthEmail(BaseModel):
+    email: str
+
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
 
 
 class ProfilePatchRequest(BaseModel):
@@ -210,26 +219,43 @@ def get_market_indicators(
 
 @app.get("/stream")
 def market_stream(
+    request: Request,
     symbol: str = Query(default="BTCUSDT"),
     tf: str = Query(default="1m", pattern=r"^(1m|5m|15m|1h|4h|1d)$"),
 ) -> StreamingResponse:
     normalized = _ensure_symbol(symbol)
-    payload = {
-        "symbol": normalized,
-        "tf": tf,
-        "ticker": _market_cache(f"mkt:{normalized}:ticker"),
-        "candles": _market_cache(f"mkt:{normalized}:{tf}:candles")[-3:],
-        "event": "snapshot",
-    }
 
     async def event_generator():
-        yield "event: snapshot\n"
-        yield f"data: {json.dumps(payload)}\n\n"
+        previous_snapshot = None
+        last_keepalive = asyncio.get_running_loop().time()
+        while not await request.is_disconnected():
+            ticker = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:ticker")
+            candles = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:{tf}:candles")
+            snapshot = {
+                "symbol": normalized,
+                "tf": tf,
+                "ticker": ticker,
+                "candles": candles[-3:],
+            }
+            fingerprint = json.dumps(snapshot, sort_keys=True)
+            if fingerprint != previous_snapshot:
+                event = "snapshot" if previous_snapshot is None else "update"
+                yield f"event: {event}\ndata: {json.dumps({**snapshot, 'event': event})}\n\n"
+                previous_snapshot = fingerprint
+                last_keepalive = asyncio.get_running_loop().time()
+            elif asyncio.get_running_loop().time() - last_keepalive >= 15:
+                yield ": keep-alive\n\n"
+                last_keepalive = asyncio.get_running_loop().time()
+            await asyncio.sleep(1)
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -252,6 +278,48 @@ def _get_supabase_url() -> str:
     if not supabase_url or not os.environ.get("SUPABASE_PUBLISHABLE_KEY"):
         raise HTTPException(status_code=503, detail="Supabase is not configured")
     return supabase_url
+
+
+async def _supabase_auth_request(path: str, body: dict[str, str | bool]) -> Response:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{_get_supabase_url()}/auth/v1/{path}",
+                headers={"apikey": os.environ["SUPABASE_PUBLISHABLE_KEY"]},
+                json=body,
+            )
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=503, detail="Supabase Auth is unavailable") from error
+
+    try:
+        payload = response.json()
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail="Invalid Supabase Auth response") from error
+    if response.status_code >= 500:
+        upstream_message = payload.get("msg") or payload.get("message") if isinstance(payload, dict) else None
+        detail = "Supabase Auth request failed"
+        if isinstance(upstream_message, str):
+            detail = f"Supabase Auth request failed: {upstream_message}"
+        raise HTTPException(status_code=503, detail=detail)
+    return JSONResponse(status_code=response.status_code, content=payload)
+
+
+@app.post("/auth/signup")
+async def auth_signup(body: AuthEmail) -> Response:
+    return await _supabase_auth_request("otp", {"email": body.email, "create_user": True})
+
+
+@app.post("/auth/signin")
+async def auth_signin(body: AuthEmail) -> Response:
+    return await _supabase_auth_request("otp", {"email": body.email, "create_user": False})
+
+
+@app.post("/auth/refresh")
+async def auth_refresh(body: AuthRefreshRequest) -> Response:
+    return await _supabase_auth_request(
+        "token?grant_type=refresh_token",
+        {"refresh_token": body.refresh_token},
+    )
 
 
 def _supabase_request(
