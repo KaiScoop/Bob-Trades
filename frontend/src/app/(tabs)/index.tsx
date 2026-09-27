@@ -8,8 +8,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppColors } from '@/constants/theme';
 import { cryptoLogoUrl } from '@/constants/crypto';
 import { api, type BrokerStatus, type Portfolio } from '@/lib/api';
-import { getAccessToken, storeMagicLinkFromUrl } from '@/lib/secure';
-import * as Linking from 'expo-linking';
 
 export default function HomeScreen() {
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -21,14 +19,6 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const restore = async () => {
-      const browserUrl = typeof window !== 'undefined' ? window.location.href : null;
-      await storeMagicLinkFromUrl(browserUrl ?? await Linking.getInitialURL());
-      const token = await getAccessToken();
-      if (!token) {
-        router.replace('/welcome');
-        return;
-      }
-      await api.getSession();
       const profile = await api.getProfile().catch(() => null);
       if (!profile?.username) {
         router.replace('/onboarding');

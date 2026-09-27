@@ -1,29 +1,33 @@
-import { DarkTheme, router, Stack, ThemeProvider, useSegments } from 'expo-router';
+import { DarkTheme, router, Stack, ThemeProvider, usePathname, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
 import { api } from '@/lib/api';
-import { clearTokens, getAccessToken, getRefreshToken } from '@/lib/secure';
+import { clearTokens, getAccessToken, getRefreshToken, storeMagicLinkFromUrl } from '@/lib/secure';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function TabLayout() {
   const segments = useSegments();
   const routeName = segments[0] ?? '';
-  const isStackRoute = ['welcome', 'sign-in', 'sign-up', 'check-email', 'onboarding'].includes(routeName);
-  const requiresSession = !['welcome', 'sign-in', 'sign-up', 'check-email'].includes(routeName);
+  const routerPathname = usePathname();
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : routerPathname;
+  const isPublicPath = ['/welcome', '/sign-in', '/sign-up', '/check-email'].includes(pathname);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([getAccessToken(), getRefreshToken()])
+    const browserUrl = typeof window !== 'undefined' ? window.location.href : null;
+    Promise.resolve(browserUrl ?? Linking.getInitialURL())
+      .then(storeMagicLinkFromUrl)
+      .then(() => Promise.all([getAccessToken(), getRefreshToken()]))
       .then(async ([accessToken, refreshToken]) => {
         if (!active) return;
         let validSession = Boolean(accessToken && refreshToken);
-        if (validSession && requiresSession) {
+        if (validSession) {
           try {
             await api.getSession();
           } catch {
@@ -33,24 +37,43 @@ export default function TabLayout() {
         }
         if (!active) return;
         setHasSession(validSession);
-        if (!validSession && requiresSession) router.replace('/welcome');
       })
-      .catch(() => {
+      .catch(async () => {
+        if (!active) return;
+        await clearTokens().catch(() => {});
         if (!active) return;
         setHasSession(false);
-        if (requiresSession) router.replace('/welcome');
       });
 
     return () => {
       active = false;
     };
-  }, [requiresSession]);
+  }, [routeName]);
+
+  useEffect(() => {
+    if (hasSession === false && !isPublicPath) {
+      router.replace('/welcome');
+    } else if (hasSession && (pathname === '/welcome' || routeName === 'welcome')) {
+      router.replace('/');
+    }
+  }, [hasSession, isPublicPath, pathname, routeName]);
 
   return (
     <ThemeProvider value={DarkTheme}>
       <StatusBar style="light" />
       <AnimatedSplashOverlay />
-      {requiresSession && hasSession !== true ? null : isStackRoute ? <Stack screenOptions={{ headerShown: false }} /> : <AppTabs />}
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="welcome" />
+        <Stack.Protected guard={hasSession === true}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="onboarding" />
+        </Stack.Protected>
+        <Stack.Protected guard={hasSession !== true}>
+          <Stack.Screen name="sign-in" />
+          <Stack.Screen name="sign-up" />
+          <Stack.Screen name="check-email" />
+        </Stack.Protected>
+      </Stack>
     </ThemeProvider>
   );
 }
