@@ -366,7 +366,7 @@ def test_bybit_client_reads_unified_balance_positions_and_orders(monkeypatch):
                     "accountType": "UNIFIED",
                     "coin": [
                         {"coin": "USDT", "availableToWithdraw": "125.5", "walletBalance": "150"},
-                        {"coin": "BTC", "availableToWithdraw": "0.01", "walletBalance": "0.02"},
+                        {"coin": "BTC", "availableToWithdraw": "", "walletBalance": "0.02", "locked": "0.005", "usdValue": "1234.5"},
                     ],
                 }
             ]
@@ -387,7 +387,7 @@ def test_bybit_client_reads_unified_balance_positions_and_orders(monkeypatch):
     orders = client.fetch_orders()
 
     assert balance["USDT"]["free"] == 125.5
-    assert positions == [{"symbol": "BTCUSDT", "side": "Buy", "size": 0.02, "free": 0.01}]
+    assert positions == [{"symbol": "BTCUSDT", "side": "Buy", "size": 0.02, "free": 0.015, "locked": 0.005, "usdValue": 1234.5}]
     assert orders == [{"orderId": "order-2"}]
     assert all("X-BAPI-SIGN" in request[1]["headers"] for request in requests)
 
