@@ -274,6 +274,35 @@ def test_market_stream_sends_updates_until_client_disconnects(monkeypatch):
     assert update.startswith("event: update\ndata: ")
 
 
+def test_market_stream_can_send_multiple_tickers(monkeypatch):
+    disconnected = iter([False, True])
+
+    async def is_disconnected():
+        return next(disconnected)
+
+    async def run_inline(function, *args):
+        return function(*args)
+
+    async def no_wait(_seconds):
+        return None
+
+    monkeypatch.setattr(main, "_market_cache", lambda key: {"lastPrice": key.split(":")[1]})
+    monkeypatch.setattr(main.asyncio, "to_thread", run_inline)
+    monkeypatch.setattr(main.asyncio, "sleep", no_wait)
+    request = Request({"type": "http", "method": "GET", "path": "/stream", "headers": []})
+    request.is_disconnected = is_disconnected
+
+    async def read_event():
+        response = main.market_stream(request, "BTCUSDT", "1m", "BTCUSDT,ETHUSDT")
+        return response, await anext(response.body_iterator)
+
+    response, event = asyncio.run(read_event())
+
+    assert response.media_type == "text/event-stream"
+    assert '"symbol": "BTCUSDT"' in event
+    assert '"lastPrice": "ETHUSDT"' in event
+
+
 def test_broker_connect_and_portfolio(monkeypatch):
     storage_tables, storage_requests = stub_supabase_storage(monkeypatch)
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
