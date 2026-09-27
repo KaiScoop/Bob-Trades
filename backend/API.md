@@ -15,15 +15,22 @@ Bybit, Supabase PostgREST, Redis, or Upstash directly.
 
 ## Authentication
 
-Supabase Auth owns sign-in, sign-up, and token refresh. Send the current Supabase
-access token on every protected request:
+Supabase Auth owns the user accounts and issues the access tokens. Create
+accounts with `POST /auth/signup` and authenticate with `POST /auth/signin`.
+Send the resulting access token on every protected request:
 
 ```http
 Authorization: Bearer <supabase-access-token>
 ```
 
-Public routes are `GET /health`, `GET /markets`, the market candle and indicator
-routes, and `GET /stream`. All other routes require authentication.
+Supabase may return tokens in a redirect URL fragment such as `#access_token=...`.
+Fragments are not sent to the server in HTTP requests; the client must parse
+them and send the access token in the `Authorization` header. Send refresh
+tokens only in the JSON body of `POST /auth/refresh`, never in a URL.
+
+Public routes are `POST /auth/signup`, `POST /auth/signin`, `GET /health`,
+`GET /markets`, the market candle and indicator routes, and `GET /stream`. All
+other routes require authentication.
 
 Common authentication failures:
 
@@ -128,23 +135,70 @@ should ignore unknown fields.
 
 ### `GET /stream?symbol=BTCUSDT&tf=1m`
 
-Returns `Content-Type: text/event-stream` with one snapshot event:
+Returns `Content-Type: text/event-stream`, first with a snapshot and then with
+an update whenever the cached ticker or recent candles change:
 
 ```text
 event: snapshot
-data: {"symbol":"BTCUSDT","tf":"1m","ticker":{},"candles":[...]}
+data: {"symbol":"BTCUSDT","tf":"1m","ticker":{},"candles":[...],"event":"snapshot"}
+
+event: update
+data: {"symbol":"BTCUSDT","tf":"1m","ticker":{},"candles":[...],"event":"update"}
 
 ```
 
-The current implementation closes after this snapshot. It is not a continuous
-subscription yet. The frontend should use the candle endpoint for bootstrap and
-must not assume this connection will deliver future ticks.
+The connection polls the worker-populated cache once per second and remains open
+until the client disconnects. It sends keep-alive comments when market data has
+not changed. Use the candle endpoint for bootstrap; the worker refreshes fast
+market data every five seconds.
 
 ## Session and profile
 
+### `POST /auth/signup`
+
+Requests a Supabase email signup link. No password is required. The user must
+follow the emailed link before an authenticated session is available.
+
+```json
+{"email":"user@example.com"}
+```
+
+The response is Supabase's OTP response; it does not contain an access token.
+
+### `POST /auth/signin`
+
+Requests a sign-in magic link for an existing user. No password is required.
+
+```json
+{"email":"user@example.com"}
+```
+
+After the user follows the link, the client obtains the Supabase session and
+uses its `access_token` as the bearer token for protected API routes.
+
 ### `GET /auth/session`
 
-Requires authentication.
+Validates the bearer access token by asking Supabase Auth for the current user.
+Invalid or expired tokens return `401`.
+
+```http
+Authorization: Bearer <access-token>
+```
+
+### `POST /auth/refresh`
+
+Exchanges a Supabase refresh token with Supabase Auth. Supabase validates it and
+returns a rotated token pair; clients must replace both stored tokens with the
+returned values. Invalid or expired refresh tokens return Supabase's auth error.
+
+```json
+{"refresh_token":"<refresh-token>"}
+```
+
+The response contains Supabase's token response, including the new
+`access_token` and `refresh_token`.
+
+`GET /auth/session` returns the validated user identity:
 
 ```json
 {"user_id":"auth-user-id","email":"user@example.com"}

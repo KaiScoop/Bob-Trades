@@ -1,8 +1,13 @@
+import asyncio
+
 import httpx
+import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app import auth
+from app import main
 from app.main import BybitClient, app
 
 
@@ -10,6 +15,8 @@ class StubAuthClient:
     def __init__(self, response: httpx.Response):
         self.response = response
         self.request_headers = None
+        self.request_url = None
+        self.request_json = None
 
     async def __aenter__(self):
         return self
@@ -17,8 +24,15 @@ class StubAuthClient:
     async def __aexit__(self, *_):
         return None
 
-    async def get(self, _url, headers):
+    async def get(self, url, headers):
+        self.request_url = url
         self.request_headers = headers
+        return self.response
+
+    async def post(self, url, headers, json):
+        self.request_url = url
+        self.request_headers = headers
+        self.request_json = json
         return self.response
 
 
@@ -26,6 +40,116 @@ def test_session_requires_bearer_token():
     response = TestClient(app).get("/auth/session")
 
     assert response.status_code == 401
+
+
+def test_auth_session_validates_access_token_with_supabase(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    stub = StubAuthClient(
+        httpx.Response(200, json={"id": "user-123", "email": "user@example.com"})
+    )
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).get(
+        "/auth/session",
+        headers={"Authorization": "Bearer access-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"user_id": "user-123", "email": "user@example.com"}
+    assert stub.request_url == "https://project.supabase.co/auth/v1/user"
+    assert stub.request_headers == {
+        "apikey": "sb_publishable_test",
+        "Authorization": "Bearer access-token",
+    }
+
+
+def test_auth_session_rejects_invalid_access_token(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    stub = StubAuthClient(httpx.Response(401, json={"msg": "Invalid token"}))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).get(
+        "/auth/session",
+        headers={"Authorization": "Bearer invalid-access-token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid or expired access token"
+
+
+def test_signup_and_signin_request_email_magic_links_from_supabase(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    stub = StubAuthClient(httpx.Response(200, json={"message_id": "message-123"}))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+    client = TestClient(app)
+    email = {"email": "user@example.com"}
+
+    signup = client.post("/auth/signup", json=email)
+    assert signup.status_code == 200
+    assert stub.request_url == "https://project.supabase.co/auth/v1/otp"
+    assert stub.request_headers == {"apikey": "sb_publishable_test"}
+    assert stub.request_json == {"email": email["email"], "create_user": True}
+
+    signin = client.post("/auth/signin", json=email)
+    assert signin.status_code == 200
+    assert stub.request_url == "https://project.supabase.co/auth/v1/otp"
+    assert stub.request_json == {"email": email["email"], "create_user": False}
+    assert signin.json() == {"message_id": "message-123"}
+
+
+def test_auth_refresh_exchanges_refresh_token_with_supabase(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    rotated_tokens = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "token_type": "bearer",
+    }
+    stub = StubAuthClient(httpx.Response(200, json=rotated_tokens))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).post(
+        "/auth/refresh",
+        json={"refresh_token": "old-refresh-token"},
+    )
+
+    assert response.status_code == 200
+    assert stub.request_url == (
+        "https://project.supabase.co/auth/v1/token?grant_type=refresh_token"
+    )
+    assert stub.request_headers == {"apikey": "sb_publishable_test"}
+    assert stub.request_json == {"refresh_token": "old-refresh-token"}
+    assert response.json() == rotated_tokens
+
+
+def test_auth_refresh_returns_supabase_rejection(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    stub = StubAuthClient(httpx.Response(400, json={"msg": "Invalid Refresh Token"}))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).post(
+        "/auth/refresh",
+        json={"refresh_token": "invalid-refresh-token"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"msg": "Invalid Refresh Token"}
+
+
+def test_auth_signup_returns_supabase_validation_error(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    stub = StubAuthClient(httpx.Response(422, json={"msg": "Email address is invalid"}))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).post("/auth/signup", json={"email": "invalid"})
+
+    assert response.status_code == 422
+    assert response.json() == {"msg": "Email address is invalid"}
 
 
 def test_markets_returns_supported_symbol_list():
@@ -109,13 +233,45 @@ def test_market_indicators_and_invalid_market_inputs(monkeypatch):
     assert unsupported_timeframe.status_code == 422
 
 
-def test_market_stream_is_sse(monkeypatch):
-    stub_market_cache(monkeypatch)
-    response = TestClient(app).get("/stream", params={"symbol": "BTCUSDT"})
+def test_market_stream_sends_updates_until_client_disconnects(monkeypatch):
+    tickers = iter([{"lastPrice": "10"}, {"lastPrice": "11"}])
+    candles = [{"ts": 1, "close": 10.0}]
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert "event: snapshot" in response.text
+    def market_cache(key):
+        return next(tickers) if key.endswith(":ticker") else candles
+
+    disconnected = iter([False, False, True])
+
+    async def is_disconnected():
+        return next(disconnected)
+
+    async def run_inline(function, *args):
+        return function(*args)
+
+    async def no_wait(_seconds):
+        return None
+
+    request = Request({"type": "http", "method": "GET", "path": "/stream", "headers": []})
+    request.is_disconnected = is_disconnected
+    monkeypatch.setattr(main, "_market_cache", market_cache)
+    monkeypatch.setattr(main.asyncio, "to_thread", run_inline)
+    monkeypatch.setattr(main.asyncio, "sleep", no_wait)
+
+    async def read_events():
+        response = main.market_stream(request, "BTCUSDT", "1m")
+        iterator = response.body_iterator
+        snapshot = await anext(iterator)
+        update = await anext(iterator)
+        with pytest.raises(StopAsyncIteration):
+            await anext(iterator)
+        return response, snapshot, update
+
+    response, snapshot, update = asyncio.run(read_events())
+
+    assert response.media_type == "text/event-stream"
+    assert response.headers["X-Accel-Buffering"] == "no"
+    assert snapshot.startswith("event: snapshot\ndata: ")
+    assert update.startswith("event: update\ndata: ")
 
 
 def test_broker_connect_and_portfolio(monkeypatch):

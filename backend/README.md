@@ -16,7 +16,8 @@ ledger and no direct mobile-to-Bybit, Redis, worker, or Postgres connection.
 
 Implemented:
 
-- Supabase bearer-token validation for protected API routes.
+- Supabase-backed email sign-up and magic-link sign-in routes, plus bearer-token
+	validation for protected API routes.
 - User profile reads and updates through RLS-protected Supabase requests.
 - Bybit testnet/mainnet credential validation and Fernet encryption at rest.
 - Cached portfolio, positions, and order reads.
@@ -36,8 +37,6 @@ Implemented:
 
 Not yet complete or not yet production-verified:
 
-- `/stream` currently returns one SSE snapshot and closes; continuous market
-	events are not implemented.
 - External Supabase, Upstash, Bybit, and Jev integration tests use mocks in the
 	local suite. A real testnet smoke test is still required.
 - API responses are mostly typed as dictionaries; generated OpenAPI schemas need
@@ -166,16 +165,28 @@ python3 -m venv .venv
 pip install -r requirements-dev.txt
 ```
 
-Run the API and worker in separate terminals from `backend/`:
+Run the API and worker as two separate processes from `backend/`. In terminal 1:
 
 ```sh
 . .venv/bin/activate
 uvicorn app.main:app --reload --port 8080
 ```
 
+In terminal 2:
+
 ```sh
 . .venv/bin/activate
 uvicorn worker.main:app --port 8081
+```
+
+The worker's `/health` endpoint is at `http://localhost:8081/health` when run
+locally. Market polling starts when both Upstash Redis variables are set.
+Trading cycles are separate and only start when `TRADING_WORKER_ENABLED=true`;
+leave it false unless you intend to run the agent with configured credentials.
+From the repository root, the equivalent worker command is:
+
+```sh
+cd backend && .venv/bin/uvicorn worker.main:app --app-dir . --host 0.0.0.0 --port 8081
 ```
 
 API URLs:
@@ -241,7 +252,6 @@ Before any live deployment, perform a testnet smoke test covering:
 
 ## Remaining work checklist
 
-- [ ] Implement continuous SSE market updates.
 - [ ] Add dedicated Pydantic response models for stable generated OpenAPI.
 - [ ] Add real testnet smoke tests and document required test data.
 - [ ] Verify worker restart/idempotency behavior against live external services.
