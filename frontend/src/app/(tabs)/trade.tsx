@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppColors } from '@/constants/theme';
 import { api } from '@/lib/api';
@@ -12,6 +13,7 @@ export default function TradeScreen() {
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1m');
   const [risk, setRisk] = useState('medium');
+  const [capitalPct, setCapitalPct] = useState(20);
   const [indicators, setIndicators] = useState<Record<string, number>>({});
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState('');
@@ -33,7 +35,7 @@ export default function TradeScreen() {
 
   const start = () => {
     setMessage('');
-    api.startAgent({ symbol, risk, max_position_pct: 0.2, arm_live: false })
+    api.startAgent({ symbol, risk, max_position_pct: capitalPct / 100, arm_live: false })
       .then(() => { setRunning(true); setMessage('Bob is running.'); })
       .catch(() => setMessage('Connect Bybit before starting Bob.'));
   };
@@ -75,6 +77,28 @@ export default function TradeScreen() {
           <Text style={styles.muted}>EMA20 <Text style={styles.indicatorValue}>{indicators.ema20?.toFixed(2) ?? '--'}</Text></Text>
         </View>
 
+        <View style={styles.allocationHeader}>
+          <Text style={styles.label}>CAPITAL PER TRADE</Text>
+          <Text style={styles.allocationValue}>{capitalPct}%</Text>
+        </View>
+        <Slider
+          accessibilityLabel="Capital allocated per trade"
+          disabled={running}
+          minimumValue={1}
+          maximumValue={100}
+          step={1}
+          value={capitalPct}
+          onValueChange={setCapitalPct}
+          minimumTrackTintColor={AppColors.accentEnd}
+          maximumTrackTintColor={AppColors.hairline}
+          thumbTintColor="#fff"
+          style={styles.slider}
+        />
+        <View style={styles.allocationBounds}>
+          <Text style={styles.muted}>1%</Text>
+          <Text style={styles.muted}>100%</Text>
+        </View>
+
         <Text style={styles.label}>RISK PROFILE</Text>
         <View style={styles.wrap}>
           {RISKS.map((item) => (
@@ -108,6 +132,10 @@ const styles = StyleSheet.create({
   indicatorRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, paddingBottom: 16, borderBottomWidth: 1, borderColor: AppColors.hairline },
   muted: { color: AppColors.muted, fontSize: 12 },
   indicatorValue: { color: '#fff', fontWeight: '600' },
+  allocationHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
+  allocationValue: { color: '#fff', fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  slider: { width: '100%', height: 36, marginTop: 2 },
+  allocationBounds: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -2 },
   message: { color: AppColors.muted, marginTop: 18 },
   action: { backgroundColor: AppColors.accentEnd, alignItems: 'center', padding: 17, borderRadius: 12, marginTop: 20 },
   stop: { backgroundColor: AppColors.danger },
