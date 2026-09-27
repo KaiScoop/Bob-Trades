@@ -7,7 +7,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
 import { cryptoLogoUrl } from '@/constants/crypto';
-import { api, type BrokerStatus, type Portfolio } from '@/lib/api';
+import { ConnectBybitModal } from '@/components/connect-bybit-modal';
+import { api, subscribeMarketPrices, type BrokerStatus, type MarketTicker, type Portfolio } from '@/lib/api';
 
 export default function HomeScreen() {
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -16,6 +17,8 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [prices, setPrices] = useState<Record<string, MarketTicker>>({});
 
   useEffect(() => {
     const restore = async () => {
@@ -42,6 +45,11 @@ export default function HomeScreen() {
       .finally(() => setLoading(false));
   }, [sessionReady]);
 
+  useEffect(() => {
+    if (!sessionReady || symbols.length === 0) return;
+    return subscribeMarketPrices(symbols, setPrices);
+  }, [sessionReady, symbols]);
+
   if (!sessionReady) return <View style={styles.container} />;
 
   return (
@@ -59,10 +67,47 @@ export default function HomeScreen() {
             <Text style={styles.balance}>{portfolio ? `$${portfolio.balance.toFixed(2)}` : '--'}</Text>
             <Text style={styles.asset}>{portfolio?.asset ?? 'USDT'}</Text>
           </LinearGradient>
-          {!loading && !broker?.connected && <Pressable style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
+          {!loading && !broker?.connected && <Pressable accessibilityRole="button" onPress={() => setConnectOpen(true)} style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
           <View style={styles.sectionHeader}><Text style={styles.sectionLabel}>MARKETS</Text><Text style={styles.muted}>{symbols.length} tracked</Text></View>
-          {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => <View key={symbol} style={styles.marketRow}><View style={styles.coin}>{cryptoLogoUrl(symbol) ? <Image source={cryptoLogoUrl(symbol) as string} style={styles.coinImage} contentFit="contain" accessibilityLabel={`${symbol} logo`} /> : <Text style={styles.coinText}>{symbol.slice(0, 1)}</Text>}</View><View style={styles.marketName}><Text style={styles.symbol}>{symbol}</Text><Text style={styles.muted}>Spot market</Text></View><Text style={styles.muted}>--</Text></View>)}
+          {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => {
+            const price = Number(prices[symbol]?.lastPrice);
+            const dailyChange = Number(prices[symbol]?.price24hPcnt);
+            const hasDailyChange = Number.isFinite(dailyChange);
+            const marketColor = hasDailyChange
+              ? dailyChange < 0 ? AppColors.danger : AppColors.success
+              : AppColors.muted;
+            const formattedPrice = Number.isFinite(price) && price > 0
+              ? `$${price.toLocaleString(undefined, { maximumFractionDigits: 8 })}`
+              : '--';
+            const formattedChange = hasDailyChange
+              ? `${dailyChange < 0 ? '↓' : '↑'} ${dailyChange >= 0 ? '+' : ''}${(dailyChange * 100).toFixed(2)}%`
+              : '--';
+            return (
+              <Pressable
+                key={symbol}
+                accessibilityRole="button"
+                accessibilityLabel={`${symbol}, ${formattedPrice}, ${formattedChange} today. Open market details`}
+                onPress={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
+                style={styles.marketRow}
+              >
+                <View style={styles.coin}>{cryptoLogoUrl(symbol) ? <Image source={cryptoLogoUrl(symbol) as string} style={styles.coinImage} contentFit="contain" accessibilityLabel={`${symbol} logo`} /> : <Text style={styles.coinText}>{symbol.slice(0, 1)}</Text>}</View>
+                <View style={styles.marketName}><Text style={styles.symbol}>{symbol}</Text><Text style={styles.muted}>Spot market</Text></View>
+                <View style={styles.marketQuote}>
+                  <Text style={[styles.marketPrice, { color: marketColor }]}>{formattedPrice}</Text>
+                  <Text style={[styles.marketChange, { color: marketColor }]}>{formattedChange}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </ScrollView>
+        <ConnectBybitModal
+          visible={connectOpen}
+          onClose={() => setConnectOpen(false)}
+          onConnected={(connection) => {
+            setBroker(connection);
+            setPortfolio({ mode: connection.mode ?? 'testnet', balance: connection.balance, asset: 'USDT' });
+          }}
+        />
       </SafeAreaView>
     </View>
   );
@@ -89,6 +134,9 @@ const styles = StyleSheet.create({
   arrow: { position: 'absolute', right: 18, top: 22, color: '#fff', fontSize: 28 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 },
   muted: { color: AppColors.muted, fontSize: 13 },
+  marketPrice: { color: '#fff', fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  marketQuote: { alignItems: 'flex-end', gap: 3 },
+  marketChange: { fontSize: 11, fontWeight: '600', fontVariant: ['tabular-nums'] },
   loader: { marginTop: 22 },
   marketRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomColor: AppColors.hairline, borderBottomWidth: 1 },
   coin: { width: 38, height: 38, borderRadius: 19, backgroundColor: AppColors.raised, alignItems: 'center', justifyContent: 'center', marginRight: 12 },

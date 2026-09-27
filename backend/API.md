@@ -152,6 +152,17 @@ until the client disconnects. It sends keep-alive comments when market data has
 not changed. Use the candle endpoint for bootstrap; the worker refreshes fast
 market data every five seconds.
 
+To receive current tickers for multiple markets on one connection, pass a
+comma-separated `symbols` query parameter:
+
+```text
+GET /stream?symbols=BTCUSDT,ETHUSDT,SOLUSDT
+```
+
+The snapshot and update data then contains a `markets` array with one
+`{ "symbol": "...", "ticker": { ... } }` entry per requested market. The
+single-symbol response remains unchanged when `symbols` is omitted.
+
 ## Session and profile
 
 ### `POST /auth/signup`
