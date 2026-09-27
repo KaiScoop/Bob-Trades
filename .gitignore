@@ -28,3 +28,5 @@ pnpm-debug.log*
 # macOS and editor artifacts
 .DS_Store
 .idea/
+
+inspo/
