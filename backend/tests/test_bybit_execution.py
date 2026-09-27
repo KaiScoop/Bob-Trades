@@ -77,6 +77,22 @@ def test_tp_sl_orders_are_both_required_and_cleaned_on_partial_failure(monkeypat
     assert {order["side"] for order in exchange.orders} == {"sell"}
 
 
+def test_close_cancels_agent_protection_before_reading_sellable_holdings(monkeypatch):
+    instance, _exchange = broker(monkeypatch)
+    calls = []
+    monkeypatch.setattr(instance, "cancel_agent_protection_orders", lambda symbol: calls.append(("cancel", symbol)))
+    monkeypatch.setattr(
+        instance,
+        "fetch_holdings",
+        lambda symbol: calls.append(("holdings", symbol)) or {"free": 0.06, "total": 0.06},
+    )
+
+    order = instance.close_position("BTCUSDT")
+
+    assert calls == [("cancel", "BTCUSDT"), ("holdings", "BTCUSDT")]
+    assert order["side"] == "sell"
+
+
 def test_mainnet_entry_fails_closed_without_arming(monkeypatch):
     instance, _exchange = broker(monkeypatch, mode="mainnet")
 

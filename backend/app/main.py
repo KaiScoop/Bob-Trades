@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from common.health import check_dependencies
 from common.market_data import SUPPORTED_SYMBOLS, delete_cached_json, get_cached_json, set_cached_json
 from worker.decision import RISK_ALIASES, _mainnet_block_reason
 
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Bob Trades API", version="0.1.0")
 
 cors_origins = [
@@ -149,12 +151,15 @@ class BybitClient:
             symbol = f"{coin.get('coin', '')}USDT"
             size = float(coin.get("walletBalance") or 0.0)
             if symbol in SUPPORTED_SYMBOLS and size > 0:
+                locked = float(coin.get("locked") or 0.0)
                 positions.append(
                     {
                         "symbol": symbol,
                         "side": "Buy",
                         "size": size,
-                        "free": float(coin.get("availableToWithdraw") or 0.0),
+                        "free": max(size - locked, 0.0),
+                        "locked": locked,
+                        "usdValue": float(coin["usdValue"]) if coin.get("usdValue") else None,
                     }
                 )
         return positions
@@ -735,13 +740,19 @@ def close_position(
             _decrypt_broker_secret(connection["secret_enc"]),
         )
         result = broker.close_position(normalized)
-        _refresh_portfolio(user, connection["mode"], broker, normalized)
     except ExecutionBlocked as error:
         raise HTTPException(status_code=403, detail=str(error)) from error
     except HTTPException:
         raise
-    except (ccxt.BaseError, RuntimeError, ValueError) as error:
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except (ccxt.BaseError, RuntimeError) as error:
+        logger.exception("Bybit position close failed for %s", normalized)
         raise HTTPException(status_code=502, detail="Bybit position close failed") from error
+    try:
+        _refresh_portfolio(user, connection["mode"], broker, normalized)
+    except (ccxt.BaseError, httpx.HTTPError, RuntimeError, ValueError):
+        logger.exception("Position %s closed but portfolio refresh failed", normalized)
     return {"status": "closed", "symbol": normalized, "result": result}
 
 

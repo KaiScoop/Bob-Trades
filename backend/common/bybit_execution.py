@@ -207,13 +207,13 @@ class BybitSpotExecution:
 
     def close_position(self, symbol: str) -> dict[str, Any]:
         self._assert_order_allowed(symbol, closing=True)
+        self.cancel_agent_protection_orders(symbol)
         holdings = self.fetch_holdings(symbol)
         if holdings["free"] <= 0:
             raise ValueError("No free spot holdings to close")
         market_symbol = self._exchange_symbol(symbol)
         amount = float(self.exchange.amount_to_precision(market_symbol, holdings["free"]))
         order = self.create_market_order(symbol, "sell", amount)
-        self.cancel_agent_protection_orders(symbol)
         return order
 
     def cancel_agent_protection_orders(self, symbol: str) -> None:
