@@ -64,6 +64,21 @@ def test_health_endpoint_reports_degraded_dependencies(monkeypatch):
     assert response.json()["status"] == "degraded"
 
 
+def test_api_allows_expo_web_cors_preflight():
+    response = TestClient(main.app).options(
+        "/markets",
+        headers={
+            "Origin": "http://localhost:8082",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:8082"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 def test_worker_health_endpoint(monkeypatch):
     monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
     monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
