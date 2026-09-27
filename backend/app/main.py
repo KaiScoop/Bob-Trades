@@ -13,6 +13,7 @@ import ccxt
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.auth import AuthenticatedUser, get_authenticated_user
@@ -23,6 +24,22 @@ from common.market_data import SUPPORTED_SYMBOLS, delete_cached_json, get_cached
 from worker.decision import RISK_ALIASES, _mainnet_block_reason
 
 app = FastAPI(title="Bob Trades API", version="0.1.0")
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:8082,http://localhost:19006,http://127.0.0.1:8082,http://127.0.0.1:19006",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def _ensure_symbol(symbol: str) -> str:
     normalized = symbol.upper()
