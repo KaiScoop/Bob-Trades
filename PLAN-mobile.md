@@ -1,182 +1,311 @@
-# PLAN: Bob Trades — React Native
+# PLAN: Bob Trades — React Native frontend
 
-Product name: **Bob Trades**. Agent inside the product is still **Jev**.
-Friend-owned UI. Uses Supabase Auth for identity and the public API for product
-data. Never talks to Redis, worker, or Bybit.
+Feed this file + `backend/API.md` + `design/logo.png` + `design/ui-inspo.png` to the VS Code agent.
 
----
+Product: **Bob Trades**. Agent name on screen: **Bob** / **Jev** (use “Bob” in marketing copy, “Jev” only in Activity technical detail if the log payload uses it).
 
-## 0. Hard rules
+Contract source of truth:  
+https://github.com/zadescoxp/Bob-Trades/blob/master/backend/API.md  
+Local API: `http://localhost:8080` (override with `EXPO_PUBLIC_API_URL`).
 
-- Product data uses `API_URL` only (one backend host); sign-in uses Supabase Auth.
-- Supabase client config: `EXPO_PUBLIC_SUPABASE_URL` and
-	`EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
-- No Bybit SDK in the app.
-- No TypeSafe key in the app.
-- Never bundle the Supabase service-role key or Upstash token.
-- Keep the Supabase Auth session in secure storage and send its access token to
-	the API as `Authorization: Bearer <token>`.
-- No Buy / Sell / Short buttons.
+The phone talks **only** to that API. No Bybit SDK, no Supabase PostgREST, no Redis, no worker port.
 
 ---
 
-## 0.1 Design references (human will drop these)
+## 0. Design language
 
-The user will attach mockups, screenshots, Figma exports, color tokens, or font notes in the agent chat or a `design/` folder.
+Inspiration board is the attached Odie-style sheet: generous white space, large type, pill buttons, simple lists, bottom tab bar, candlestick as a hero on the trade surface.
 
-Rules for the coding agent:
+**Invert it.** Do not ship a white app.
 
-- Those files **win** on layout, type, color, spacing, and component look.
-- This plan still wins on **behavior** (no manual buy, API-only, chart data path).
-- If a mock shows a Buy button, **do not implement it**. Keep the visual system, drop the action.
-- If a mock and this plan conflict on screens, ask once, then follow the mock for UI and this plan for data.
-- Put reusable tokens in one theme file (`theme.ts`) extracted from the references. Do not hard-code random hex on each screen.
-- Do not invent a second visual language while waiting for mocks. Use a neutral shell until the first reference lands, then restyle to match.
+| Token | Value |
+|---|---|
+| Background / primary | `#000000` |
+| Surface | `#0A0A0A` cards, `#111111` raised |
+| Hairline | `#1F1F1F` |
+| Text primary | `#FFFFFF` |
+| Text muted | `#A1A1AA` |
+| Text faint | `#71717A` |
+| Danger | `#EF4444` |
+| Success | `#22C55E` |
+| Accent start | `#0C31B3` |
+| Accent end | `#0947BD` |
+| Accent fill | linear `135deg`, `#0C31B3` → `#0947BD` |
 
-Expected drop pattern: `design/logo.png` (or svg), `design/auth.png`, `design/markets.png`, `design/symbol.png`, `design/positions.png`, plus any dark-mode variants.
+**Type**
 
-## 0.2 Branding and coin art
+- Body / UI / numbers: **Google Sans Flex** (Regular 400, Medium 500, Semibold 600)
+- Headings / splash wordmark / section titles: **Instrument Sans** (Semibold 600, Bold 700)
 
-- App display name: **Bob Trades**. Bundle id / slug: `bobtrades`.
-- User-supplied **logo** in `design/` is the splash + header mark. Do not invent a wordmark if a file is present.
-- Coin icons (7 assets only): prefer **bundled local PNGs** after first fetch so the list does not depend on a third-party CDN at runtime.
+Splash headline is Instrument Sans. Everything else that is a sentence is Google Sans Flex.
 
-Free sources the agent may use to seed `assets/coins/`:
+**Logo**
 
-| Coin | CoinGecko id | CDN (jsDelivr, no key) |
+User file: white rounded-square “pause / two pills” mark on black.
+
+- Splash: logo 96–120pt, centered
+- Header / tab selected: 24pt mark, no extra container
+- Do not recolor the mark. It is already white-on-black.
+- Do not add a wordmark next to it unless a lockup file is dropped later
+
+**Shape**
+
+- Radius 16 on cards, 24 on primary buttons, 999 on chips/tabs
+- Primary CTA = accent gradient fill + white label
+- Secondary CTA = 1px `#1F1F1F` hairline, white label
+- Lists: icon 32, name + ticker, right-aligned change in green/red
+- No neon, no glassmorphism, no stock “crypto purple”
+
+**Behavior the inspo must NOT copy**
+
+The board has Buy / Sell / Deposit / Withdraw / keypad. **Do not build those.** Bob starts the agent. User may only close or edit TP/SL.
+
+---
+
+## 1. Navigation
+
+Unauthenticated stack:
+
+1. Splash / welcome  
+2. Sign up | Sign in (email magic link)  
+3. Check email  
+4. Onboarding (username + DOB) — only if `GET /me` has null username  
+
+Authenticated tabs (left → right):
+
+| Tab | Icon idea | Screen |
 |---|---|---|
-| BTC | bitcoin | `https://cdn.jsdelivr.net/gh/simplr-sh/coin-logos/images/bitcoin/standard.png` |
-| ETH | ethereum | `.../images/ethereum/standard.png` |
-| SOL | solana | `.../images/solana/standard.png` |
-| BNB | binancecoin | `.../images/binancecoin/standard.png` |
-| XRP | ripple | `.../images/ripple/standard.png` |
-| ADA | cardano | `.../images/cardano/standard.png` |
-| LINK | chainlink | `.../images/chainlink/standard.png` |
+| Home | mark / house | Greeting + portfolio + coin list |
+| Positions | briefcase | Active / History |
+| Trade | pulse / chart | Pick asset + risk + Start Bob |
+| Activity | list | Jev logs |
+| Profile | person | Account + broker |
 
-Also valid: CoinGecko `image.small` on `/coins/{id}` (rate-limited), or `https://logo.octav.fi/api/icon/eth.png`.
-
-Do not call CoinGecko from every list render. Download once into the repo. If the user drops custom coin art, those files win.
+No sixth tab. Connect-Bybit is a full-screen pushed from Home or Profile when `GET /broker/status.connected === false`.
 
 ---
 
-## 1. Screens
+## 2. Screens and API
 
-1. Auth — Google / X / email via Supabase Auth
-2. Profile setup — username (required), DOB optional
-3. Home — Testnet | Mainnet toggle (disabled until Bybit connected for that mode)
-4. Connect Bybit — in-app checklist + key/secret fields + “Test connection”
-5. Markets — 7 assets from `GET /markets`; live ticker prices via one API SSE
-	subscription per displayed symbol
-6. Symbol — Lightweight Charts, TF chips, Start Jev panel
-7. Agent — start/stop, risk, max %, live log with `latency_ms`
-8. Positions — open from Bybit, Close, Edit TP/SL
-9. History — recent Bybit orders + agent decisions. The backend does not expose
-	full fill history yet.
+### 2.1 Splash / welcome (one screen)
+
+- Full black  
+- Logo  
+- Heading Instrument Sans: **Let Bob Trade**  
+- Subtext Google Sans Flex muted: **You set the risk. Bob takes the tape.**  
+- Gradient **Sign up** → signup  
+- Ghost **Sign in** → signin  
+
+Optional 1s logo-only beat before the buttons fade in. No carousel.
+
+### 2.2 Auth
+
+Backend is **email magic link, no password**.
+
+Sign up: email field → `POST /auth/signup` `{ email }` → “Check your email”  
+Sign in: same field → `POST /auth/signin` `{ email }`
+
+After the user opens the link, parse `#access_token` / session, store `access_token` + `refresh_token` in secure storage, then `GET /auth/session`.
+
+Refresh: `POST /auth/refresh` `{ refresh_token }` on 401; replace both tokens.
+
+Empty / error: 422 inline under the field. Do not invent a password UI.
+
+### 2.3 Onboarding
+
+If `GET /me` → `username` is null:
+
+- Title: **What should Bob call you?**  
+- Username (required)  
+- Date of birth (optional, `YYYY-MM-DD`)  
+- Gradient **Continue** → `PATCH /me`
+
+Skip DOB if they leave it blank.
+
+### 2.4 Connect Bybit (gate)
+
+Show before Trade can start, and as a Home banner if disconnected.
+
+- Mode segmented: **Testnet** | **Mainnet**  
+- API key, API secret (secret field obscured)  
+- Checklist: Spot trade on, Withdraw off, this mode’s site only  
+- **Test connection** → `POST /broker/bybit`  
+- Success: badge + `balance` from response  
+- Disconnect later from Profile → `DELETE /broker/bybit`
+
+Never log secrets. Never put them in AsyncStorage unencrypted beyond the request.
+
+### 2.5 Home
+
+```
+Hello, {username}
+[Testnet|Mainnet pill]   [balance USDT from GET /portfolio]
+
+Portfolio card
+  USDT available
+  mode
+
+Markets
+  row × GET /markets symbols
+  last close from candles or ticker if present
+```
+
+Tap a row → Trade preselected to that symbol (or a lightweight chart sheet). Do not open a manual order ticket.
+
+If disconnected: portfolio card CTA **Connect Bybit**.
+
+Pull-to-refresh: `/portfolio` + `/markets` + one candle close per symbol if cheap; otherwise portfolio + markets only.
+
+### 2.6 Positions
+
+Tabs: **Active** | **History**
+
+Active = `GET /positions`  
+Each row: symbol, side, size, optional free. Swipe / buttons:
+
+- **Close** → confirm sheet → `POST /positions/{symbol}/close`  
+- **TP / SL** → two numeric fields → `POST /positions/{symbol}/tpsl` `{ tp, sl }`
+
+History: `GET /orders` (treat unknown fields as optional). Filter chips: All / Open / Filled if the payload allows; otherwise a single list.
+
+Empty Active: **Bob hasn’t opened anything yet.** No Buy button.
+
+### 2.7 Trade
+
+This is **configure Bob**, not a ticket.
+
+1. Asset picker — the 7 symbols (`BTCUSDT` … `LINKUSDT` exact strings)  
+2. Chart — Lightweight Charts  
+   - Bootstrap `GET /markets/{symbol}/candles?tf=`  
+   - Live `GET /stream?symbol=&tf=` SSE (keep-alives are comments; ignore)  
+   - TF chips: `1m 5m 15m 1h 4h 1d`  
+   - Fallback if SSE flakes: poll candles every 5s  
+3. Optional indicator strip from `GET /markets/{symbol}/indicators` (RSI / EMA20)  
+4. Risk: Low / Medium / High → API `low` / `medium` / `high`  
+5. Max position slider → `max_position_pct` `0.05–0.5` default `0.2`  
+6. Mainnet only: checkbox **Arm live** → `arm_live: true`  
+7. Gradient **Start Bob** → `POST /agent/start`  
+8. If running: red-outline **Stop Bob** → `POST /agent/stop`
+
+Blocked until broker connected. Testnet starts without the arm checkbox.
+
+No market/limit toggle. No keypad amount. No Buy Now.
+
+### 2.8 Activity
+
+`GET /agent/logs?limit=50` (newest first).
+
+List row:
+
+- Time (`ts`)  
+- Symbol if present in `request_json`  
+- `reason`  
+- `latency_ms` (e.g. **118 ms**)  
+- Pills: intended / executed as yes/no  
+
+Tap → detail: pretty-printed `request_json` / `response_json`, raw reason.
+
+Empty: **Bob is quiet. Start a session from Trade.**
+
+Pull to refresh. Optional 10s poll while Trade has the agent on.
+
+### 2.9 Profile
+
+- Avatar placeholder = first letter of username on accent gradient  
+- Username, email from session, DOB  
+- Broker card: connected?, mode, balance, **Disconnect**  
+- Edit username  
+- Sign out (clear tokens)  
+- App version  
+- Hide admin `POST /agent/kill-switch` unless you later add an admin flag
 
 ---
 
-## 2. Chart data
+## 3. Things the human did not list — still build
 
-On open symbol:
-
-1. `GET /markets/ETHUSDT/candles?tf=1m` → paint the candle history
-2. `GET /markets/ETHUSDT/indicators?tf=1m` → populate indicator values
-3. Open `GET /stream?symbol=ETHUSDT&tf=1m` using Server-Sent Events (SSE)
-4. Render the initial `snapshot`, then apply `update` events. Each event has
-	`symbol`, `tf`, `ticker`, the most recent three `candles`, and `event`.
-
-Do not open a Bybit WebSocket from the phone.
-
-Supported symbols are `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `XRPUSDT`,
-`ADAUSDT`, and `LINKUSDT`. Supported timeframes are `1m`, `5m`, `15m`, `1h`,
-`4h`, and `1d`. `GET /markets` returns symbols only, not prices.
-
-Switch TF → new candle/indicator REST bootstrap + resubscribe. One SSE
-subscription at a time. The stream polls cached data and emits updates when it
-changes; it is not a raw-tick stream.
+- Session restore on launch: token → `/auth/session` → `/me` → onboarding or tabs  
+- Global testnet / mainnet pill in Home header (from `/broker/status`)  
+- 503 on candles: “Markets warming up” not a crash  
+- 502 on Bybit: toast, keep local UI  
+- Keyboard-avoiding on auth and connect  
+- Safe area + black status bar  
+- Haptics on Start / Stop / Close only  
+- Skeleton cards on first Home load  
+- Deep link / URL handler for the magic-link return  
+- One `api.ts` client: base URL, bearer, refresh-once-on-401  
 
 ---
 
-## 3. Start Jev
+## 4. Data client
 
-Required before start:
+```
+lib/api.ts
+  get/post/patch/delete
+  Authorization Bearer
+  on 401 → refresh → retry once
 
-- Broker connected for current mode
-- Testnet: balance > 0 shown from `GET /portfolio`
-- Mainnet: extra confirm + `armed` understood
+lib/sse.ts     EventSource-compatible for /stream
+lib/secure.ts  tokens
+theme.ts       colors, radii, type
+assets/logo.png
+assets/coins/* bundled 7 icons
+```
 
-Then `POST /agent/start`. Poll `GET /agent/logs?limit=50` for decisions and
-execution status. The mobile app must not read `user:{id}:agent` from Redis.
-Starting an agent requires `TRADING_WORKER_ENABLED=true` in the backend API and
-worker environment; the worker must be running. A disabled worker returns
-`503`. Testnet starts are armed automatically; mainnet requires
-`arm_live: true` and is subject to backend risk gates.
+Display map (API id → label):
 
----
+| API | Label |
+|---|---|
+| BTCUSDT | Bitcoin · BTC |
+| ETHUSDT | Ethereum · ETH |
+| SOLUSDT | Solana · SOL |
+| BNBUSDT | BNB · BNB |
+| XRPUSDT | XRP · XRP |
+| ADAUSDT | Cardano · ADA |
+| LINKUSDT | Chainlink · LINK |
 
-## 4. Positions
-
-Render `GET /positions`. Actions:
-
-- Close → `POST /positions/{symbol}/close`
-- TP/SL → `POST /positions/{symbol}/tpsl`
-
-If empty, say “Jev has no open position” — not “place a trade.”
-
----
-
-## 5. Out of scope v1
-
-- Multi-broker picker
-- Paper mode
-- Manual order ticket
-- OAuth Bybit button (show “coming soon” if you want)
-- Push notifications (nice later)
+Always send the `USDT` id on the wire.
 
 ---
 
-## 6. Contract with backend
+## 5. Suggested screen files
 
-Sign-up, sign-in, and token refresh use the Supabase Auth SDK. Keep its session
-in secure storage and send the access token on protected backend requests.
-Supabase redirects may return tokens in a URL fragment; the app must parse the
-fragment because browsers do not send it to the server. `GET /auth/session`
-confirms the API recognizes the access token. Use the Supabase SDK to refresh
-tokens; it handles refresh-token rotation.
+```
+app/
+  (auth)/welcome.tsx
+  (auth)/sign-up.tsx
+  (auth)/sign-in.tsx
+  (auth)/check-email.tsx
+  (auth)/onboarding.tsx
+  (tabs)/home.tsx
+  (tabs)/positions.tsx
+  (tabs)/trade.tsx
+  (tabs)/activity.tsx
+  (tabs)/profile.tsx
+  connect-bybit.tsx
+  activity/[id].tsx
+```
 
-The complete API contract is `backend/API.md`. If a field is missing, add it on
-the API — do not call Supabase PostgREST, Bybit, Redis, or the worker from RN.
+Expo Router is fine. React Navigation is fine. Pick one.
 
-### Backend route inventory
+---
 
-All product data uses `API_URL`. Routes marked **protected** require
-`Authorization: Bearer <access-token>`.
+## 6. Agent working rules
 
-Public:
+- Match spacing and list density of the inspiration sheet; match **color and type** of this plan.  
+- If a mock shows Buy/Sell, implement the layout without those actions.  
+- Do not call worker `:8081`.  
+- Do not add coins.  
+- Do not add password auth unless `API.md` changes.  
+- Keep `API.md` field names exactly (`max_position_pct`, `arm_live`, `tf`, `reason`).  
+- First milestone: welcome + auth + home shells on black with logo. Then Trade chart. Then connect + start.
 
-- `GET /health` — API/dependency health.
-- `GET /markets` — supported symbol list; does not return prices.
-- `GET /markets/{symbol}/candles?tf=1m` — candle history.
-- `GET /markets/{symbol}/indicators?tf=1m` — indicators.
-- `GET /stream?symbol=BTCUSDT&tf=1m` — SSE snapshot and changed-data updates.
-- `POST /auth/signup` — request an email signup link; body `{ "email": "..." }`.
-- `POST /auth/signin` — request an existing-user magic link; body `{ "email": "..." }`.
-- `POST /auth/refresh` — exchange a refresh token; body `{ "refresh_token": "..." }`.
-	The app uses the Supabase SDK for these auth operations per the hard rules.
+---
 
-Protected:
+## 7. Copy bank
 
-- `GET /auth/session` — validate the current access token and return user id/email.
-- `GET /me` — read profile; `PATCH /me` — update username and/or DOB.
-- `POST /broker/bybit` — connect `{ "mode", "api_key", "api_secret" }`.
-- `GET /broker/status` — connection state and mode.
-- `DELETE /broker/bybit` — disconnect Bybit and stop the user's agent.
-- `GET /portfolio` — cached/refreshed USDT balance.
-- `GET /positions` — current Bybit spot positions.
-- `GET /orders` — recent/open Bybit orders, not a complete fill-history endpoint.
-- `POST /agent/start` — `{ "symbol", "risk", "max_position_pct", "arm_live" }`.
-- `POST /agent/stop` — stop the user's agent.
-- `GET /agent/logs?limit=50` — newest-first agent decision logs.
-- `POST /positions/{symbol}/close` — close a position.
-- `POST /positions/{symbol}/tpsl` — update `{ "tp", "sl" }`.
-- `POST /agent/kill-switch` — admin-only global trading kill switch.
+- Splash sub: **You set the risk. Bob takes the tape.**  
+- Home empty broker: **Connect Bybit to see your book.**  
+- Positions empty: **No open positions.**  
+- Activity empty: **No decisions yet.**  
+- Mainnet start: **This uses real funds on Bybit.**  
+- Stop: **Bob will not open new trades. Open positions stay until you close them.**
