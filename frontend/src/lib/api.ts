@@ -26,7 +26,7 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
       return request<T>(path, init, false);
     }
   }
-  if (!response.ok) throw new Error(`API ${response.status}`);
+  if (!response.ok) throw new Error(`API ${response.status} ${init?.method?.toUpperCase() ?? 'GET'} ${path}`);
   return response.json() as Promise<T>;
 }
 
