@@ -11,6 +11,78 @@ export type Session = { user_id: string; email: string };
 export type Profile = { user_id: string; username: string | null; dob: string | null };
 export type Position = { symbol: string; side: string; size: number; free?: number };
 export type AgentLog = { id: number; ts: string; latency_ms: number; request_json: Record<string, unknown>; response_json: Record<string, unknown>; intended: boolean; executed: boolean; reason: string };
+export type MarketTicker = { lastPrice?: string; price24hPcnt?: string; highPrice24h?: string; lowPrice24h?: string; turnover24h?: string };
+export type MarketCandle = { ts: number; close: number; open: number; high: number; low: number; volume: number };
+
+export function subscribeMarketPrices(
+  symbols: string[],
+  onPrices: (prices: Record<string, MarketTicker>) => void,
+): () => void {
+  let stopped = false;
+  let connection: XMLHttpRequest | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const connect = () => {
+    if (stopped) return;
+    const request = new XMLHttpRequest();
+    connection = request;
+    let offset = 0;
+    let pending = '';
+
+    const readEvents = () => {
+      const responseText = request.responseText ?? '';
+      pending += responseText.slice(offset);
+      offset = responseText.length;
+      const blocks = pending.split(/\r?\n\r?\n/);
+      pending = blocks.pop() ?? '';
+
+      for (const block of blocks) {
+        const data = block
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trimStart())
+          .join('\n');
+        if (!data) continue;
+        try {
+          const event = JSON.parse(data) as { markets?: { symbol: string; ticker: MarketTicker }[] };
+          const prices = Object.fromEntries(
+            (event.markets ?? []).map(({ symbol, ticker }) => [symbol, ticker]),
+          );
+          if (Object.keys(prices).length > 0) onPrices(prices);
+        } catch {
+          continue;
+        }
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped || retryTimer) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        connect();
+      }, 2500);
+    };
+
+    request.open('GET', `${API_URL}/stream?symbols=${encodeURIComponent(symbols.join(','))}`);
+    request.setRequestHeader('Accept', 'text/event-stream');
+    request.onprogress = readEvents;
+    request.onerror = scheduleReconnect;
+    request.onreadystatechange = () => {
+      if (request.readyState === XMLHttpRequest.DONE) {
+        readEvents();
+        scheduleReconnect();
+      }
+    };
+    request.send();
+  };
+
+  connect();
+  return () => {
+    stopped = true;
+    if (retryTimer) clearTimeout(retryTimer);
+    connection?.abort();
+  };
+}
 
 async function request<T>(path: string, init?: RequestInit, retry = true): Promise<T> {
   const token = await getAccessToken();
@@ -50,7 +122,7 @@ export const api = {
   getLogs: (limit = 50) => request<{ logs: AgentLog[] }>(`/agent/logs?limit=${limit}`),
   startAgent: (payload: { symbol: string; risk: string; max_position_pct: number; arm_live: boolean }) => request('/agent/start', { method: 'POST', body: JSON.stringify(payload) }),
   stopAgent: () => request('/agent/stop', { method: 'POST' }),
-  getCandles: (symbol: string, tf: string) => request<{ candles: { ts: number; close: number; open: number; high: number; low: number; volume: number }[] }>(`/markets/${symbol}/candles?tf=${tf}`),
+  getCandles: (symbol: string, tf: string) => request<{ candles: MarketCandle[] }>(`/markets/${symbol}/candles?tf=${tf}`),
   getIndicators: (symbol: string, tf: string) => request<{ indicators: Record<string, number> }>(`/markets/${symbol}/indicators?tf=${tf}`),
   getMarkets: () => request<{ symbols: string[] }>('/markets'),
   getPortfolio: () => request<Portfolio>('/portfolio'),
