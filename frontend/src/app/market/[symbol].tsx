@@ -1,12 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
-import { api, subscribeMarketPrices, type MarketCandle, type MarketTicker } from '@/lib/api';
-
-const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d'];
+import { MarketChart } from '@/components/market-chart';
+import { api } from '@/lib/api';
+import { useLiveMarketChart } from '@/hooks/use-live-market-chart';
 
 function formatPrice(value: number | string | undefined) {
   const price = Number(value);
@@ -19,28 +19,17 @@ export default function MarketDetailScreen() {
   const { symbol: routeSymbol } = useLocalSearchParams<{ symbol: string }>();
   const symbol = (routeSymbol ?? 'BTCUSDT').toUpperCase();
   const [timeframe, setTimeframe] = useState('1m');
-  const [ticker, setTicker] = useState<MarketTicker | null>(null);
-  const [candles, setCandles] = useState<MarketCandle[]>([]);
   const [indicators, setIndicators] = useState<Record<string, number>>({});
-  const [loadedTimeframe, setLoadedTimeframe] = useState<string | null>(null);
-  const [dataUnavailable, setDataUnavailable] = useState(false);
-
-  useEffect(() => subscribeMarketPrices([symbol], (prices) => {
-    if (prices[symbol]) setTicker(prices[symbol]);
-  }), [symbol]);
+  const { candles, ticker, loading, unavailable } = useLiveMarketChart(symbol, timeframe);
 
   useEffect(() => {
     let active = true;
-    Promise.allSettled([api.getCandles(symbol, timeframe), api.getIndicators(symbol, timeframe)])
-      .then(([candleResult, indicatorResult]) => {
+    api.getIndicators(symbol, timeframe)
+      .then((result) => {
         if (!active) return;
-        if (candleResult.status === 'fulfilled') setCandles(candleResult.value.candles.slice(-12).reverse());
-        setDataUnavailable(candleResult.status === 'rejected');
-        if (indicatorResult.status === 'fulfilled') setIndicators(indicatorResult.value.indicators);
+        setIndicators(result.indicators);
       })
-      .finally(() => {
-        if (active) setLoadedTimeframe(timeframe);
-      });
+      .catch(() => { if (active) setIndicators({}); });
     return () => { active = false; };
   }, [symbol, timeframe]);
 
@@ -52,8 +41,6 @@ export default function MarketDetailScreen() {
   const dailyChangeColor = Number.isFinite(dailyChange)
     ? dailyChange < 0 ? AppColors.danger : AppColors.success
     : AppColors.muted;
-  const loading = loadedTimeframe !== timeframe;
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -80,40 +67,20 @@ export default function MarketDetailScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>PRICE HISTORY</Text>
-        <View style={styles.timeframes}>
-          {TIMEFRAMES.map((item) => (
-            <Pressable
-              key={item}
-              accessibilityRole="button"
-              accessibilityState={{ selected: timeframe === item }}
-              onPress={() => setTimeframe(item)}
-              style={[styles.timeframe, timeframe === item && styles.timeframeSelected]}
-            >
-              <Text style={[styles.timeframeText, timeframe === item && styles.timeframeTextSelected]}>{item}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <MarketChart
+          symbol={symbol}
+          timeframe={timeframe}
+          onTimeframeChange={setTimeframe}
+          candles={candles}
+          loading={loading}
+          unavailable={unavailable}
+        />
 
         <View style={styles.indicators}>
           <Text style={styles.indicatorValue}>RSI14 <Text style={styles.indicatorNumber}>{indicators.rsi14?.toFixed(1) ?? indicators.rsi?.toFixed(1) ?? '--'}</Text></Text>
           <Text style={styles.indicatorValue}>EMA20 <Text style={styles.indicatorNumber}>{indicators.ema20?.toFixed(2) ?? '--'}</Text></Text>
         </View>
 
-        <Text style={styles.sectionTitle}>RECENT CANDLES</Text>
-        {candles.length > 0 && <View style={styles.candleHeader}><Text style={styles.candleHeading}>TIME</Text><Text style={styles.candleHeading}>OPEN</Text><Text style={styles.candleHeading}>HIGH</Text><Text style={styles.candleHeading}>LOW</Text><Text style={styles.candleHeading}>CLOSE</Text></View>}
-        {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : dataUnavailable ? (
-          <Text style={styles.empty}>Market history is temporarily unavailable.</Text>
-        ) : candles.length === 0 ? (
-          <Text style={styles.empty}>Waiting for market data.</Text>
-        ) : candles.map((candle) => (
-          <View key={candle.ts} style={styles.candleRow}>
-            <Text style={styles.candleTime}>{new Date(candle.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-            <Text style={styles.candleValue}>{formatPrice(candle.open)}</Text>
-            <Text style={styles.candleValue}>{formatPrice(candle.high)}</Text>
-            <Text style={styles.candleValue}>{formatPrice(candle.low)}</Text>
-            <Text style={styles.candleValue}>{formatPrice(candle.close)}</Text>
-          </View>
-        ))}
       </ScrollView>
     </SafeAreaView>
   );
@@ -138,19 +105,7 @@ const styles = StyleSheet.create({
   statLabel: { color: AppColors.faint, fontSize: 9, fontWeight: '700', letterSpacing: 0.8 },
   statValue: { color: '#fff', fontSize: 12, fontWeight: '600', marginTop: 7 },
   sectionTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginTop: 24, marginBottom: 12 },
-  timeframes: { flexDirection: 'row', backgroundColor: AppColors.surface, borderRadius: 8, padding: 4, gap: 2 },
-  timeframe: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 6 },
-  timeframeSelected: { backgroundColor: AppColors.accentEnd },
-  timeframeText: { color: AppColors.muted, fontSize: 11, fontWeight: '600' },
-  timeframeTextSelected: { color: '#fff' },
   indicators: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderColor: AppColors.hairline },
   indicatorValue: { color: AppColors.muted, fontSize: 12 },
   indicatorNumber: { color: '#fff', fontWeight: '600' },
-  candleHeader: { flexDirection: 'row', paddingTop: 8 },
-  candleHeading: { flex: 1, color: AppColors.faint, fontSize: 8, fontWeight: '700', textAlign: 'right' },
-  candleRow: { flexDirection: 'row', paddingVertical: 11, borderBottomWidth: 1, borderColor: AppColors.hairline },
-  candleTime: { flex: 1.2, color: AppColors.muted, fontSize: 9 },
-  candleValue: { flex: 1, color: '#fff', fontSize: 9, fontVariant: ['tabular-nums'], textAlign: 'right' },
-  loader: { marginTop: 22 },
-  empty: { color: AppColors.muted, fontSize: 13, paddingVertical: 14 },
 });
