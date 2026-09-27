@@ -2,9 +2,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
+import { cryptoLogoUrl } from '@/constants/crypto';
 import { api, type BrokerStatus, type Portfolio } from '@/lib/api';
 import { getAccessToken, storeMagicLinkFromUrl } from '@/lib/secure';
 import * as Linking from 'expo-linking';
@@ -69,7 +71,7 @@ export default function HomeScreen() {
           </LinearGradient>
           {!loading && !broker?.connected && <Pressable style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
           <View style={styles.sectionHeader}><Text style={styles.sectionLabel}>MARKETS</Text><Text style={styles.muted}>{symbols.length} tracked</Text></View>
-          {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => <View key={symbol} style={styles.marketRow}><View style={styles.coin}><Text style={styles.coinText}>{symbol.slice(0, 1)}</Text></View><View style={styles.marketName}><Text style={styles.symbol}>{symbol}</Text><Text style={styles.muted}>Spot market</Text></View><Text style={styles.muted}>--</Text></View>)}
+          {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => <View key={symbol} style={styles.marketRow}><View style={styles.coin}>{cryptoLogoUrl(symbol) ? <Image source={cryptoLogoUrl(symbol) as string} style={styles.coinImage} contentFit="contain" accessibilityLabel={`${symbol} logo`} /> : <Text style={styles.coinText}>{symbol.slice(0, 1)}</Text>}</View><View style={styles.marketName}><Text style={styles.symbol}>{symbol}</Text><Text style={styles.muted}>Spot market</Text></View><Text style={styles.muted}>--</Text></View>)}
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -101,6 +103,7 @@ const styles = StyleSheet.create({
   marketRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomColor: AppColors.hairline, borderBottomWidth: 1 },
   coin: { width: 38, height: 38, borderRadius: 19, backgroundColor: AppColors.raised, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   coinText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  coinImage: { width: 28, height: 28 },
   marketName: { flex: 1 },
   symbol: { color: '#fff', fontWeight: '700', fontSize: 15, marginBottom: 3 },
 });

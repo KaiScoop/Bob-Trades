@@ -1,6 +1,9 @@
 import { getAccessToken, getRefreshToken, saveTokens } from '@/lib/secure';
+import { Platform } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
+const API_URL = Platform.OS === 'web'
+  ? (process.env.EXPO_PUBLIC_WEB_API_URL ?? 'http://localhost:8080')
+  : (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080');
 
 export type Portfolio = { mode: string; balance: number; asset: string };
 export type BrokerStatus = { connected: boolean; mode: string | null; balance: number };
