@@ -51,7 +51,7 @@ Free sources the agent may use to seed `assets/coins/`:
 | BNB | binancecoin | `.../images/binancecoin/standard.png` |
 | XRP | ripple | `.../images/ripple/standard.png` |
 | ADA | cardano | `.../images/cardano/standard.png` |
-| TRX | tron | `.../images/tron/standard.png` |
+| LINK | chainlink | `.../images/chainlink/standard.png` |
 
 Also valid: CoinGecko `image.small` on `/coins/{id}` (rate-limited), or `https://logo.octav.fi/api/icon/eth.png`.
 
@@ -65,11 +65,13 @@ Do not call CoinGecko from every list render. Download once into the repo. If th
 2. Profile setup — username (required), DOB optional
 3. Home — Testnet | Mainnet toggle (disabled until Bybit connected for that mode)
 4. Connect Bybit — in-app checklist + key/secret fields + “Test connection”
-5. Markets — 7 assets, last price from `GET /markets` (Redis-backed)
+5. Markets — 7 assets from `GET /markets`; live ticker prices via one API SSE
+	subscription per displayed symbol
 6. Symbol — Lightweight Charts, TF chips, Start Jev panel
 7. Agent — start/stop, risk, max %, live log with `latency_ms`
 8. Positions — open from Bybit, Close, Edit TP/SL
-9. History — fills + agent decisions
+9. History — recent Bybit orders + agent decisions. The backend does not expose
+	full fill history yet.
 
 ---
 
@@ -77,13 +79,21 @@ Do not call CoinGecko from every list render. Download once into the repo. If th
 
 On open symbol:
 
-1. `GET /markets/ETH-USD/candles?tf=1m` → paint
-2. Open `GET /stream?symbol=ETH-USD&tf=1m` (SSE or WS **to your API**)
-3. Append ticks / closed bars
+1. `GET /markets/ETHUSDT/candles?tf=1m` → paint the candle history
+2. `GET /markets/ETHUSDT/indicators?tf=1m` → populate indicator values
+3. Open `GET /stream?symbol=ETHUSDT&tf=1m` using Server-Sent Events (SSE)
+4. Render the initial `snapshot`, then apply `update` events. Each event has
+	`symbol`, `tf`, `ticker`, the most recent three `candles`, and `event`.
 
 Do not open a Bybit WebSocket from the phone.
 
-Switch TF → new REST bootstrap + resubscribe. One subscription at a time.
+Supported symbols are `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `BNBUSDT`, `XRPUSDT`,
+`ADAUSDT`, and `LINKUSDT`. Supported timeframes are `1m`, `5m`, `15m`, `1h`,
+`4h`, and `1d`. `GET /markets` returns symbols only, not prices.
+
+Switch TF → new candle/indicator REST bootstrap + resubscribe. One SSE
+subscription at a time. The stream polls cached data and emits updates when it
+changes; it is not a raw-tick stream.
 
 ---
 
@@ -95,7 +105,12 @@ Required before start:
 - Testnet: balance > 0 shown from `GET /portfolio`
 - Mainnet: extra confirm + `armed` understood
 
-Then `POST /agent/start`. Poll or SSE `user:{id}:agent` via API for log lines.
+Then `POST /agent/start`. Poll `GET /agent/logs?limit=50` for decisions and
+execution status. The mobile app must not read `user:{id}:agent` from Redis.
+Starting an agent requires `TRADING_WORKER_ENABLED=true` in the backend API and
+worker environment; the worker must be running. A disabled worker returns
+`503`. Testnet starts are armed automatically; mainnet requires
+`arm_live: true` and is subject to backend risk gates.
 
 ---
 
@@ -122,8 +137,46 @@ If empty, say “Jev has no open position” — not “place a trade.”
 
 ## 6. Contract with backend
 
-Sign-up, sign-in, and token refresh use the Supabase Auth SDK. The app sends the
-resulting access token on protected backend requests; `GET /auth/session` can
-confirm the API recognizes the session. OpenAPI from `PLAN-backend.md` section
-4 is the contract for all product data. If a field is missing, add it on the
-API — do not scrape Bybit from RN.
+Sign-up, sign-in, and token refresh use the Supabase Auth SDK. Keep its session
+in secure storage and send the access token on protected backend requests.
+Supabase redirects may return tokens in a URL fragment; the app must parse the
+fragment because browsers do not send it to the server. `GET /auth/session`
+confirms the API recognizes the access token. Use the Supabase SDK to refresh
+tokens; it handles refresh-token rotation.
+
+The complete API contract is `backend/API.md`. If a field is missing, add it on
+the API — do not call Supabase PostgREST, Bybit, Redis, or the worker from RN.
+
+### Backend route inventory
+
+All product data uses `API_URL`. Routes marked **protected** require
+`Authorization: Bearer <access-token>`.
+
+Public:
+
+- `GET /health` — API/dependency health.
+- `GET /markets` — supported symbol list; does not return prices.
+- `GET /markets/{symbol}/candles?tf=1m` — candle history.
+- `GET /markets/{symbol}/indicators?tf=1m` — indicators.
+- `GET /stream?symbol=BTCUSDT&tf=1m` — SSE snapshot and changed-data updates.
+- `POST /auth/signup` — request an email signup link; body `{ "email": "..." }`.
+- `POST /auth/signin` — request an existing-user magic link; body `{ "email": "..." }`.
+- `POST /auth/refresh` — exchange a refresh token; body `{ "refresh_token": "..." }`.
+	The app uses the Supabase SDK for these auth operations per the hard rules.
+
+Protected:
+
+- `GET /auth/session` — validate the current access token and return user id/email.
+- `GET /me` — read profile; `PATCH /me` — update username and/or DOB.
+- `POST /broker/bybit` — connect `{ "mode", "api_key", "api_secret" }`.
+- `GET /broker/status` — connection state and mode.
+- `DELETE /broker/bybit` — disconnect Bybit and stop the user's agent.
+- `GET /portfolio` — cached/refreshed USDT balance.
+- `GET /positions` — current Bybit spot positions.
+- `GET /orders` — recent/open Bybit orders, not a complete fill-history endpoint.
+- `POST /agent/start` — `{ "symbol", "risk", "max_position_pct", "arm_live" }`.
+- `POST /agent/stop` — stop the user's agent.
+- `GET /agent/logs?limit=50` — newest-first agent decision logs.
+- `POST /positions/{symbol}/close` — close a position.
+- `POST /positions/{symbol}/tpsl` — update `{ "tp", "sl" }`.
+- `POST /agent/kill-switch` — admin-only global trading kill switch.
