@@ -26,7 +26,11 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
       return request<T>(path, init, false);
     }
   }
-  if (!response.ok) throw new Error(`API ${response.status} ${init?.method?.toUpperCase() ?? 'GET'} ${path}`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { detail?: unknown } | null;
+    const detail = typeof payload?.detail === 'string' ? `: ${payload.detail}` : '';
+    throw new Error(`API ${response.status} ${init?.method?.toUpperCase() ?? 'GET'} ${path}${detail}`);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -37,7 +41,7 @@ export const api = {
   getSession: () => request<Session>('/auth/session'),
   getProfile: () => request<Profile>('/me'),
   updateProfile: (profile: { username: string; dob?: string }) => request<Profile>('/me', { method: 'PATCH', body: JSON.stringify(profile) }),
-  connectBybit: (payload: { mode: 'testnet' | 'mainnet'; api_key: string; api_secret: string }) => request('/broker/bybit', { method: 'POST', body: JSON.stringify(payload) }),
+  connectBybit: (payload: { mode: 'testnet' | 'mainnet'; api_key: string; api_secret: string }) => request<{ status: 'connected'; mode: string; balance: number }>('/broker/bybit', { method: 'POST', body: JSON.stringify(payload) }),
   disconnectBybit: () => request<{ deleted: boolean }>('/broker/bybit', { method: 'DELETE' }),
   getPositions: () => request<{ positions: Position[]; count: number }>('/positions'),
   getOrders: () => request<{ orders: Record<string, unknown>[]; count: number }>('/orders'),

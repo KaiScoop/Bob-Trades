@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
 import { cryptoLogoUrl } from '@/constants/crypto';
+import { ConnectBybitModal } from '@/components/connect-bybit-modal';
 import { api, type BrokerStatus, type Portfolio } from '@/lib/api';
 
 export default function HomeScreen() {
@@ -16,6 +17,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   useEffect(() => {
     const restore = async () => {
@@ -59,10 +61,18 @@ export default function HomeScreen() {
             <Text style={styles.balance}>{portfolio ? `$${portfolio.balance.toFixed(2)}` : '--'}</Text>
             <Text style={styles.asset}>{portfolio?.asset ?? 'USDT'}</Text>
           </LinearGradient>
-          {!loading && !broker?.connected && <Pressable style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
+          {!loading && !broker?.connected && <Pressable accessibilityRole="button" onPress={() => setConnectOpen(true)} style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
           <View style={styles.sectionHeader}><Text style={styles.sectionLabel}>MARKETS</Text><Text style={styles.muted}>{symbols.length} tracked</Text></View>
           {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => <View key={symbol} style={styles.marketRow}><View style={styles.coin}>{cryptoLogoUrl(symbol) ? <Image source={cryptoLogoUrl(symbol) as string} style={styles.coinImage} contentFit="contain" accessibilityLabel={`${symbol} logo`} /> : <Text style={styles.coinText}>{symbol.slice(0, 1)}</Text>}</View><View style={styles.marketName}><Text style={styles.symbol}>{symbol}</Text><Text style={styles.muted}>Spot market</Text></View><Text style={styles.muted}>--</Text></View>)}
         </ScrollView>
+        <ConnectBybitModal
+          visible={connectOpen}
+          onClose={() => setConnectOpen(false)}
+          onConnected={(connection) => {
+            setBroker(connection);
+            setPortfolio({ mode: connection.mode ?? 'testnet', balance: connection.balance, asset: 'USDT' });
+          }}
+        />
       </SafeAreaView>
     </View>
   );
