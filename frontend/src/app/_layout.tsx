@@ -66,6 +66,7 @@ export default function TabLayout() {
         <Stack.Screen name="welcome" />
         <Stack.Protected guard={hasSession === true}>
           <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="market/[symbol]" />
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
         <Stack.Protected guard={hasSession !== true}>
