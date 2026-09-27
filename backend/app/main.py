@@ -239,21 +239,43 @@ def market_stream(
     request: Request,
     symbol: str = Query(default="BTCUSDT"),
     tf: str = Query(default="1m", pattern=r"^(1m|5m|15m|1h|4h|1d)$"),
+    symbols: str | None = None,
 ) -> StreamingResponse:
     normalized = _ensure_symbol(symbol)
+    normalized_symbols = (
+        list(dict.fromkeys(_ensure_symbol(item) for item in symbols.split(",") if item))
+        if symbols is not None
+        else None
+    )
+    if normalized_symbols is not None and not normalized_symbols:
+        raise HTTPException(status_code=422, detail="symbols must include at least one market")
 
     async def event_generator():
         previous_snapshot = None
         last_keepalive = asyncio.get_running_loop().time()
         while not await request.is_disconnected():
-            ticker = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:ticker")
-            candles = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:{tf}:candles")
-            snapshot = {
-                "symbol": normalized,
-                "tf": tf,
-                "ticker": ticker,
-                "candles": candles[-3:],
-            }
+            if normalized_symbols is not None:
+                tickers = await asyncio.gather(
+                    *(
+                        asyncio.to_thread(_market_cache, f"mkt:{market}:ticker")
+                        for market in normalized_symbols
+                    )
+                )
+                snapshot = {
+                    "markets": [
+                        {"symbol": market, "ticker": ticker}
+                        for market, ticker in zip(normalized_symbols, tickers)
+                    ]
+                }
+            else:
+                ticker = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:ticker")
+                candles = await asyncio.to_thread(_market_cache, f"mkt:{normalized}:{tf}:candles")
+                snapshot = {
+                    "symbol": normalized,
+                    "tf": tf,
+                    "ticker": ticker,
+                    "candles": candles[-3:],
+                }
             fingerprint = json.dumps(snapshot, sort_keys=True)
             if fingerprint != previous_snapshot:
                 event = "snapshot" if previous_snapshot is None else "update"
