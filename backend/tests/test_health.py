@@ -79,6 +79,36 @@ def test_api_allows_expo_web_cors_preflight():
     assert response.headers["access-control-allow-credentials"] == "true"
 
 
+def test_api_allows_local_frontend_signin_preflight():
+    response = TestClient(main.app).options(
+        "/auth/signin",
+        headers={
+            "Origin": "http://localhost:8000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:8000"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_api_allows_expo_web_signin_preflight():
+    response = TestClient(main.app).options(
+        "/auth/signin",
+        headers={
+            "Origin": "http://localhost:8081",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:8081"
+    assert response.headers["access-control-allow-credentials"] == "true"
+
+
 def test_worker_health_endpoint(monkeypatch):
     monkeypatch.delenv("UPSTASH_REDIS_REST_URL", raising=False)
     monkeypatch.delenv("UPSTASH_REDIS_REST_TOKEN", raising=False)
