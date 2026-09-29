@@ -33,10 +33,11 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:8082,http://localhost:19006,http://127.0.0.1:8082,http://127.0.0.1:19006",
+        "http://localhost:8000,http://localhost:8082,http://localhost:19006,http://127.0.0.1:8000,http://127.0.0.1:8082,http://127.0.0.1:19006",
     ).split(",")
     if origin.strip()
 ]
+cors_origins.extend(("http://localhost:8081", "http://127.0.0.1:8081"))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
