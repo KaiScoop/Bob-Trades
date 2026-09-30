@@ -4,6 +4,7 @@ import { AppText as Text } from '@/components/app-text';
 import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppColors } from '@/constants/theme';
+import { NetworkSwitch } from '@/components/network-switch';
 import { api } from '@/lib/api';
 import { MarketChart } from '@/components/market-chart';
 import { useLiveMarketChart } from '@/hooks/use-live-market-chart';
@@ -46,7 +47,10 @@ export default function TradeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>Configure Bob</Text>
+        <View style={styles.header}>
+          <Text style={styles.title}>Configure Bob</Text>
+          <NetworkSwitch />
+        </View>
         <Text style={styles.label}>ASSET</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assetList}>
           {(symbols.length ? symbols : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']).map((item) => (
@@ -119,7 +123,8 @@ export default function TradeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: AppColors.background, paddingHorizontal: 20 },
   content: { paddingBottom: 48 },
-  title: { color: '#fff', fontSize: 30, fontWeight: '700', marginTop: 16, marginBottom: 22 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 16, marginBottom: 22 },
+  title: { color: '#fff', fontSize: 27, fontWeight: '700', flex: 1 },
   label: { color: AppColors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 20, marginBottom: 10 },
   assetList: { gap: 8 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
