@@ -413,6 +413,87 @@ def test_bybit_client_reads_unified_balance_positions_and_orders(monkeypatch):
     assert all("X-BAPI-SIGN" in request[1]["headers"] for request in requests)
 
 
+def test_bybit_client_fetches_paginated_order_activity_by_product(monkeypatch):
+    client = BybitClient("testnet", "key", "secret")
+    requests = []
+
+    def fake_private_get(path, params):
+        requests.append((path, dict(params)))
+        category = params["category"]
+        cursor = params.get("cursor")
+        return {
+            "list": [{"symbol": category, "createdTime": "200" if category == "inverse" else "100"}],
+            "nextPageCursor": None if cursor else f"{category}-next",
+        }
+
+    monkeypatch.setattr(client, "_private_get", fake_private_get)
+
+    first_page = client.fetch_order_activity("futures", "history", None, 50)
+    assert first_page["supported"] is True
+    assert first_page["count"] == 2
+    assert [record["symbol"] for record in first_page["records"]] == ["inverse", "linear"]
+    assert requests[0][0] == "/v5/order/history"
+    assert requests[0][1]["category"] == "linear"
+    assert requests[0][1]["settleCoin"] == "USDT"
+    assert requests[1][1]["category"] == "inverse"
+    assert requests[1][1]["settleCoin"] == "USD"
+
+    second_page = client.fetch_order_activity("futures", "history", first_page["next_cursor"], 50)
+    assert second_page["count"] == 2
+    assert requests[2][1]["cursor"] == "linear-next"
+    assert requests[3][1]["cursor"] == "inverse-next"
+    assert second_page["next_cursor"] is None
+
+    client.fetch_order_activity("spot", "open", None, 50)
+    assert requests[4][0] == "/v5/order/realtime"
+    assert requests[4][1]["openOnly"] == "0"
+    client.fetch_order_activity("options", "trades", None, 50)
+    assert requests[5][0] == "/v5/execution/list"
+    assert requests[5][1]["category"] == "option"
+    assert requests[5][1]["execType"] == "Trade"
+
+    request_count = len(requests)
+    stocks = client.fetch_order_activity("stocks", "open", None, 50)
+    assert stocks["supported"] is False
+    assert stocks["records"] == []
+    assert len(requests) == request_count
+
+
+def test_order_activity_endpoint_returns_records_and_cursor(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-orders", "email": "orders@example.com"})),
+    )
+
+    class FakeBybitClient:
+        def fetch_order_activity(self, product, view, cursor, limit):
+            return {
+                "supported": True,
+                "message": None,
+                "records": [{"symbol": "BTCUSDT", "orderStatus": "New"}],
+                "count": 1,
+                "next_cursor": "page-two",
+            }
+
+    monkeypatch.setattr("app.main._get_user_client", lambda _user: FakeBybitClient())
+    response = TestClient(app).get(
+        "/orders/spot/open?limit=25",
+        headers={"Authorization": "Bearer user-access-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported": True,
+        "message": None,
+        "records": [{"symbol": "BTCUSDT", "orderStatus": "New"}],
+        "count": 1,
+        "next_cursor": "page-two",
+    }
+
+
 def test_broker_status_requires_connection(monkeypatch):
     stub_supabase_storage(monkeypatch)
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
