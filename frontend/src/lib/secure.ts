@@ -4,6 +4,21 @@ import { Platform } from 'react-native';
 const ACCESS_TOKEN_KEY = 'bob_access_token';
 const REFRESH_TOKEN_KEY = 'bob_refresh_token';
 
+export async function getLocalSetting(key: string) {
+  if (Platform.OS === 'web') {
+    return typeof window === 'undefined' ? null : localStorage.getItem(key);
+  }
+  return SecureStore.getItemAsync(key);
+}
+
+export async function setLocalSetting(key: string, value: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') localStorage.setItem(key, value);
+    return;
+  }
+  await SecureStore.setItemAsync(key, value);
+}
+
 export async function saveTokens(accessToken: string, refreshToken?: string) {
   if (Platform.OS === 'web') {
     localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
