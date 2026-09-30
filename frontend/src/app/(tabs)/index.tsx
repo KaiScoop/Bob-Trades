@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppColors } from '@/constants/theme';
 import { cryptoLogoUrl } from '@/constants/crypto';
 import { ConnectBybitModal } from '@/components/connect-bybit-modal';
+import { NetworkSwitch } from '@/components/network-switch';
 import { api, subscribeMarketPrices, type BrokerStatus, type MarketTicker } from '@/lib/api';
 import { loadWatchlist, saveWatchlist } from '@/lib/watchlist';
 
@@ -148,8 +149,6 @@ export default function HomeScreen() {
     .sort((left, right) => Math.abs(dailyChange(prices, right) ?? 0) - Math.abs(dailyChange(prices, left) ?? 0))
     .slice(0, 3);
   const visibleSymbols = showAllMarkets ? symbols : symbols.slice(0, 4);
-  const activeMode: NetworkMode = broker?.mode === 'mainnet' ? 'mainnet' : 'testnet';
-
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -157,10 +156,7 @@ export default function HomeScreen() {
           <View style={styles.header}>
             <View style={styles.mark}><View style={styles.markPill} /><View style={styles.markPill} /></View>
             <View><Text style={styles.eyebrow}>BOB TRADES</Text><Text style={styles.greeting}>Hey, {username}</Text></View>
-            <NetworkSwitch
-              mode={activeMode}
-              onToggle={() => openNetwork(activeMode === 'mainnet' ? 'testnet' : 'mainnet')}
-            />
+            <NetworkSwitch />
           </View>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Watchlist</Text>
@@ -259,24 +255,6 @@ export default function HomeScreen() {
         />
       </SafeAreaView>
     </View>
-  );
-}
-
-function NetworkSwitch({ mode, onToggle }: { mode: NetworkMode; onToggle: () => void }) {
-  const isMainnet = mode === 'mainnet';
-  return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityLabel="Trading network"
-      accessibilityState={{ checked: isMainnet }}
-      onPress={onToggle}
-      style={styles.networkTrack}>
-      <View style={[styles.networkKnob, isMainnet ? styles.networkKnobMain : styles.networkKnobTest]}>
-        <Text style={[styles.networkText, isMainnet && styles.networkTextMain]}>
-          {isMainnet ? 'MAIN' : 'TEST'}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 
@@ -443,12 +421,6 @@ const styles = StyleSheet.create({
   markPill: { width: 5, height: 16, borderRadius: 4, backgroundColor: '#000' },
   eyebrow: { color: AppColors.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
   greeting: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 2 },
-  networkTrack: { marginLeft: 'auto', width: 84, height: 34, borderRadius: 17, padding: 3, backgroundColor: AppColors.raised, borderWidth: 1, borderColor: AppColors.hairline, justifyContent: 'center' },
-  networkKnob: { width: 48, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  networkKnobTest: { alignSelf: 'flex-start', backgroundColor: '#24242A' },
-  networkKnobMain: { alignSelf: 'flex-end', backgroundColor: AppColors.accentEnd },
-  networkText: { color: AppColors.muted, fontSize: 10, fontWeight: '700' },
-  networkTextMain: { color: '#FFFFFF' },
   sectionLabel: { color: AppColors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
   cardMuted: { color: '#C7D2FE', fontSize: 13 },
   connectBanner: { backgroundColor: AppColors.surface, borderColor: AppColors.hairline, borderWidth: 1, borderRadius: 8, padding: 16, position: 'relative', marginTop: 8 },
