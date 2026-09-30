@@ -31,8 +31,8 @@ export const AppColors = {
   hairline: '#1F1F1F',
   muted: '#A1A1AA',
   faint: '#71717A',
-  accent: '#0C31B3',
-  accentEnd: '#0947BD',
+  accent: '#0081FB',
+  accentEnd: '#0081FB',
   success: '#22C55E',
   danger: '#EF4444',
 } as const;
