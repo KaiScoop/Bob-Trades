@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { AppText as Text } from '@/components/app-text';
 import Slider from '@react-native-community/slider';
@@ -11,6 +12,7 @@ import { useLiveMarketChart } from '@/hooks/use-live-market-chart';
 
 const RISKS = ['low', 'medium', 'high'];
 export default function TradeScreen() {
+  const { symbol: symbolParam } = useLocalSearchParams<{ symbol?: string }>();
   const [symbols, setSymbols] = useState<string[]>([]);
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1m');
@@ -21,6 +23,13 @@ export default function TradeScreen() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(true);
   const { candles, ticker, loading, unavailable } = useLiveMarketChart(symbol, timeframe);
+
+  useEffect(() => {
+    if (symbolParam) {
+      const next = String(symbolParam).toUpperCase();
+      if (next) setSymbol(next);
+    }
+  }, [symbolParam]);
 
   useEffect(() => {
     api.getMarkets()
@@ -48,17 +57,23 @@ export default function TradeScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <Text style={styles.title}>Configure Bob</Text>
+          <View style={styles.titleWrap}>
+            <Text style={styles.title}>Configure Bob</Text>
+            <Text style={styles.subtitle}>Capital allocation and risk profile</Text>
+          </View>
           <NetworkSwitch />
         </View>
-        <Text style={styles.label}>ASSET</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assetList}>
-          {(symbols.length ? symbols : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']).map((item) => (
-            <Pressable key={item} onPress={() => setSymbol(item)} style={[styles.chip, symbol === item && styles.chipSelected]}>
-              <Text style={styles.chipText}>{item}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+
+        <View style={styles.panel}>
+          <Text style={styles.label}>ASSET</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assetList}>
+            {(symbols.length ? symbols : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']).map((item) => (
+              <Pressable key={item} onPress={() => setSymbol(item)} style={[styles.chip, symbol === item && styles.chipSelected]}>
+                <Text style={styles.chipText}>{item}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
 
         <View style={styles.chartHeading}>
           <View>
@@ -82,35 +97,39 @@ export default function TradeScreen() {
           <Text style={styles.muted}>EMA20 <Text style={styles.indicatorValue}>{indicators.ema20?.toFixed(2) ?? '--'}</Text></Text>
         </View>
 
-        <View style={styles.allocationHeader}>
-          <Text style={styles.label}>CAPITAL PER TRADE</Text>
-          <Text style={styles.allocationValue}>{capitalPct}%</Text>
-        </View>
-        <Slider
-          accessibilityLabel="Capital allocated per trade"
-          disabled={running}
-          minimumValue={1}
-          maximumValue={100}
-          step={1}
-          value={capitalPct}
-          onValueChange={setCapitalPct}
-          minimumTrackTintColor={AppColors.accentEnd}
-          maximumTrackTintColor={AppColors.hairline}
-          thumbTintColor="#fff"
-          style={styles.slider}
-        />
-        <View style={styles.allocationBounds}>
-          <Text style={styles.muted}>1%</Text>
-          <Text style={styles.muted}>100%</Text>
+        <View style={styles.panel}>
+          <View style={styles.allocationHeader}>
+            <Text style={styles.label}>CAPITAL PER TRADE</Text>
+            <Text style={styles.allocationValue}>{capitalPct}%</Text>
+          </View>
+          <Slider
+            accessibilityLabel="Capital allocated per trade"
+            disabled={running}
+            minimumValue={1}
+            maximumValue={100}
+            step={1}
+            value={capitalPct}
+            onValueChange={setCapitalPct}
+            minimumTrackTintColor={AppColors.accentEnd}
+            maximumTrackTintColor={AppColors.hairline}
+            thumbTintColor="#fff"
+            style={styles.slider}
+          />
+          <View style={styles.allocationBounds}>
+            <Text style={styles.muted}>1%</Text>
+            <Text style={styles.muted}>100%</Text>
+          </View>
         </View>
 
-        <Text style={styles.label}>RISK PROFILE</Text>
-        <View style={styles.wrap}>
-          {RISKS.map((item) => (
-            <Pressable key={item} onPress={() => setRisk(item)} style={[styles.chip, risk === item && styles.chipSelected]}>
-              <Text style={styles.chipText}>{item}</Text>
-            </Pressable>
-          ))}
+        <View style={styles.panel}>
+          <Text style={styles.label}>RISK PROFILE</Text>
+          <View style={styles.wrap}>
+            {RISKS.map((item) => (
+              <Pressable key={item} onPress={() => setRisk(item)} style={[styles.chip, risk === item && styles.chipSelected]}>
+                <Text style={styles.chipText}>{item}</Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
         {message ? <Text style={styles.message}>{message}</Text> : null}
         <Pressable onPress={running ? stop : start} style={[styles.action, running && styles.stop]}>
@@ -124,8 +143,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: AppColors.background, paddingHorizontal: 20 },
   content: { paddingBottom: 48 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 16, marginBottom: 22 },
-  title: { color: '#fff', fontSize: 27, fontWeight: '700', flex: 1 },
+  titleWrap: { flex: 1 },
+  title: { color: '#fff', fontSize: 27, fontWeight: '700' },
+  subtitle: { color: AppColors.muted, fontSize: 12, marginTop: 4 },
   label: { color: AppColors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.4, marginTop: 20, marginBottom: 10 },
+  panel: { backgroundColor: AppColors.surface, borderWidth: 1, borderColor: AppColors.hairline, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, marginTop: 14 },
   assetList: { gap: 8 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderColor: AppColors.hairline, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
