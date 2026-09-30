@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppText as Text } from '@/components/app-text';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -80,7 +80,11 @@ export default function ProfileScreen() {
 				</View>
 				<View style={styles.identity}>
 					<View style={styles.avatar}>
-						<Text style={styles.avatarText}>{(profile?.username ?? session?.email ?? 'B').slice(0, 1).toUpperCase()}</Text>
+						{profile?.avatar_url ? (
+							<Image source={{ uri: profile.avatar_url }} style={styles.avatarImage} />
+						) : (
+							<Text style={styles.avatarText}>{(profile?.username ?? session?.email ?? 'B').slice(0, 1).toUpperCase()}</Text>
+						)}
 					</View>
 					<View style={styles.identityText}>
 						<Text style={styles.name}>{profile?.username ?? 'Set your username'}</Text>
@@ -197,7 +201,8 @@ const styles = StyleSheet.create({
 	pageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 20 },
 	title: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
 	identity: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingBottom: 24 },
-	avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: AppColors.accentEnd, alignItems: 'center', justifyContent: 'center' },
+	avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: AppColors.accentEnd, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+	avatarImage: { width: '100%', height: '100%', borderRadius: 26 },
 	avatarText: { color: '#FFFFFF', fontSize: 22, fontWeight: '700' },
 	identityText: { flex: 1, minWidth: 0 },
 	name: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
