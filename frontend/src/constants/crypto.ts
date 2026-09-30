@@ -6,6 +6,16 @@ const ICONS: Record<string, string> = {
   XRPUSDT: 'ripple',
   ADAUSDT: 'cardano',
   LINKUSDT: 'chainlink',
+  USDT: 'tether',
+  USDC: 'usd-coin',
+  DOGEUSDT: 'dogecoin',
+  DOTUSDT: 'polkadot',
+  LTCUSDT: 'litecoin',
+  TRXUSDT: 'tron',
+  AVAXUSDT: 'avalanche',
+  TONUSDT: 'toncoin',
+  BCHUSDT: 'bitcoin-cash',
+  ATOMUSDT: 'cosmos',
 };
 
 export const cryptoLogoUrl = (symbol: string) => {
