@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -63,11 +62,11 @@ export default function HomeScreen() {
             <View style={styles.modePill}><Text style={styles.modeText}>{broker?.mode ?? 'offline'}</Text></View>
           </View>
           <Text style={styles.sectionLabel}>PORTFOLIO</Text>
-          <LinearGradient colors={[AppColors.accent, AppColors.accentEnd]} style={styles.portfolioCard}>
+          <View style={styles.portfolioCard}>
             <Text style={styles.cardMuted}>Available balance</Text>
             <Text style={styles.balance}>{portfolio ? `$${portfolio.balance.toFixed(2)}` : '--'}</Text>
             <Text style={styles.asset}>{portfolio?.asset ?? 'USDT'}</Text>
-          </LinearGradient>
+          </View>
           {!loading && !broker?.connected && <Pressable accessibilityRole="button" onPress={() => setConnectOpen(true)} style={styles.connectBanner}><Text style={styles.connectTitle}>Connect Bybit</Text><Text style={styles.cardMuted}>Connect your account to let Bob trade safely.</Text><Text style={styles.arrow}>›</Text></Pressable>}
           <View style={styles.sectionHeader}><Text style={styles.sectionLabel}>MARKETS</Text><Text style={styles.muted}>{symbols.length} tracked</Text></View>
           {loading ? <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} /> : error ? <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text> : symbols.map((symbol) => {
