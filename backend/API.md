@@ -311,6 +311,25 @@ payload:
 
 The frontend should treat unknown order fields as optional.
 
+### `GET /orders/{product}/{view}`
+
+Fetches a page of Bybit order activity while preserving every raw record field.
+`product` is `stocks`, `spot`, `futures`, or `options`; `view` is `open`,
+`history`, or `trades`. Pass `next_cursor` back as the `cursor` query parameter
+to load the next page. Futures combines linear USDT-settled and inverse
+USD-settled records. The `stocks` product returns `supported: false` because
+the current Bybit integration does not support TradFi stock order APIs.
+
+```json
+{
+  "supported": true,
+  "message": null,
+  "records": [{"symbol": "BTCUSDT", "side": "Buy", "orderStatus": "New"}],
+  "count": 1,
+  "next_cursor": null
+}
+```
+
 ## Agent
 
 ### `POST /agent/start`
