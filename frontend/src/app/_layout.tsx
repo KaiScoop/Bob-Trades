@@ -84,18 +84,23 @@ export default function TabLayout() {
       <StatusBar style="light" />
       <AnimatedSplashOverlay />
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="welcome" />
+        <Stack.Screen name="welcome" options={authScreenOptions} />
         <Stack.Protected guard={hasSession === true}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="market/[symbol]" />
           <Stack.Screen name="onboarding" />
         </Stack.Protected>
         <Stack.Protected guard={hasSession !== true}>
-          <Stack.Screen name="sign-in" />
-          <Stack.Screen name="sign-up" />
-          <Stack.Screen name="check-email" />
+          <Stack.Screen name="sign-in" options={authScreenOptions} />
+          <Stack.Screen name="sign-up" options={authScreenOptions} />
+          <Stack.Screen name="check-email" options={authScreenOptions} />
         </Stack.Protected>
       </Stack>
     </ThemeProvider>
   );
 }
+
+const authScreenOptions = {
+  animation: 'slide_from_right' as const,
+  contentStyle: { backgroundColor: '#000000' },
+};
