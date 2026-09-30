@@ -21,9 +21,12 @@ Implemented:
 - User profile reads and updates through RLS-protected Supabase requests.
 - Bybit testnet/mainnet credential validation and Fernet encryption at rest.
 - Cached portfolio, positions, and order reads.
-- Seven supported USDT spot symbols and six timeframes.
+- Seven supported USDT spot symbols and six timeframes, with Bybit spot ticker
+	and order-book snapshots cached for market-detail views.
 - Worker market polling with closed-candle filtering, RSI, EMA, MACD, and
 	heartbeat writes to Upstash Redis.
+- Market API routes for candles, calculated indicators, cached order-book
+	spread/depth, and single- or multi-symbol ticker streams.
 - Worker agent state construction, Jev evaluation, Python risk gates, daily-loss
 	checks, kill-switch checks, candle deduplication, and decision logging.
 - Agent start/stop, decision-log, position-close, TP/SL, and admin kill-switch
@@ -47,8 +50,9 @@ Not yet complete or not yet production-verified:
 	under worker restart and network-failure conditions.
 - Mainnet deployment hardening, secret rotation, observability, rate limiting,
 	and rollback procedures remain operational work.
-- The mobile frontend still needs to consume and verify this contract against a
-	running backend.
+- Device-level frontend verification against a running backend and configured
+	Bybit account is still required; the frontend now consumes the documented
+	market, profile, portfolio, agent, and order-activity routes.
 
 Do not enable live trading until the real testnet smoke test, failure handling,
 and deployment checks have passed.
@@ -210,6 +214,7 @@ have health checks.
 Read [`API.md`](API.md) for the frontend integration contract. It documents:
 
 - Public market routes and supported symbols/timeframes.
+- Ticker streaming, candle and indicator payloads, and order-book depth metrics.
 - Supabase bearer authentication.
 - Profile and Bybit connection flows.
 - Portfolio, positions, and order reads.
@@ -258,5 +263,6 @@ Before any live deployment, perform a testnet smoke test covering:
 - [ ] Add production logging, metrics, alerting, rate limits, and request IDs.
 - [ ] Review secret rotation and service-role access procedures.
 - [ ] Harden Docker deployment and define rollback/runbook procedures.
-- [ ] Complete frontend integration and device-level API verification.
+- [x] Wire frontend market, portfolio, trade, and settings screens to documented API routes.
+- [ ] Complete device-level verification against a running backend and Bybit testnet account.
 - [ ] Keep API.md, OpenAPI output, and this README synchronized as routes evolve.
