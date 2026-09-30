@@ -170,15 +170,14 @@ export default function HomeScreen() {
             <Text style={styles.muted}>{watchlistSymbols.length} saved</Text>
           </View>
           {watchlistSymbols.length ? (
-            <View style={styles.marketGrid}>
+            <View style={styles.watchlist}>
               {watchlistSymbols.map((symbol) => (
-                <MarketCard
+                <WatchlistRow
                   key={`watch-${symbol}`}
                   symbol={symbol}
                   price={prices[symbol]?.lastPrice}
                   change={dailyChange(prices, symbol)}
                   sparkline={sparklineData[symbol] ?? []}
-                  isSaved
                   onToggleSaved={() => toggleWatchlist(symbol)}
                   onOpen={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
                 />
@@ -217,6 +216,7 @@ export default function HomeScreen() {
                   price={prices[symbol]?.lastPrice}
                   change={dailyChange(prices, symbol)}
                   sparkline={sparklineData[symbol] ?? []}
+                    fullWidth={visibleSymbols.length === 1}
                   isSaved={watchlist.includes(symbol)}
                   onToggleSaved={() => toggleWatchlist(symbol)}
                   onOpen={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
@@ -270,6 +270,7 @@ function MarketCard({
   price,
   change,
   sparkline,
+  fullWidth = false,
   isSaved,
   onToggleSaved,
   onOpen,
@@ -278,6 +279,7 @@ function MarketCard({
   price?: string;
   change: number | null;
   sparkline: number[];
+  fullWidth?: boolean;
   isSaved: boolean;
   onToggleSaved: () => void;
   onOpen: () => void;
@@ -291,7 +293,7 @@ function MarketCard({
   const logo = cryptoLogoUrl(symbol);
 
   return (
-    <View style={styles.marketCard}>
+    <View style={[styles.marketCard, fullWidth && styles.marketCardFull]}>
       <View style={styles.marketCardHeader}>
         <View style={styles.coin}>
           {logo ? (
@@ -325,18 +327,72 @@ function MarketCard({
   );
 }
 
-function Sparkline({ values, color }: { values: number[]; color: string }) {
+function WatchlistRow({
+  symbol,
+  price,
+  change,
+  sparkline,
+  onToggleSaved,
+  onOpen,
+}: {
+  symbol: string;
+  price?: string;
+  change: number | null;
+  sparkline: number[];
+  onToggleSaved: () => void;
+  onOpen: () => void;
+}) {
+  const changeColor = change === null
+    ? AppColors.muted
+    : change < 0 ? AppColors.danger : AppColors.success;
+  const formattedChange = change === null
+    ? '--'
+    : `${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)}%`;
+  const logo = cryptoLogoUrl(symbol);
+
+  return (
+    <View style={styles.watchlistRow}>
+      <Pressable accessibilityRole="button" onPress={onOpen} style={styles.watchlistMain}>
+        <View style={styles.coin}>
+          {logo ? (
+            <Image source={logo} style={styles.coinImage} contentFit="contain" accessibilityLabel={`${assetName(symbol)} logo`} />
+          ) : (
+            <Text style={styles.coinText}>{symbol.slice(0, 1)}</Text>
+          )}
+        </View>
+        <View style={styles.watchlistName}>
+          <Text numberOfLines={1} style={styles.assetName}>{assetName(symbol)}</Text>
+          <Text style={styles.symbol}>{symbol.replace('USDT', '')} / USDT</Text>
+        </View>
+        <View style={styles.watchlistQuote}>
+          <Text numberOfLines={1} style={styles.watchlistPrice}>{formatPrice(price)}</Text>
+          <Text style={[styles.watchlistChange, { color: changeColor }]}>{formattedChange}</Text>
+        </View>
+        <Sparkline values={sparkline} color={change !== null && change < 0 ? AppColors.danger : AppColors.accentEnd} width={58} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${assetName(symbol)} from watchlist`}
+        onPress={onToggleSaved}
+        style={styles.watchButton}>
+        <MaterialCommunityIcons name="star" size={19} color={AppColors.accentEnd} />
+      </Pressable>
+    </View>
+  );
+}
+
+function Sparkline({ values, color, width = SPARKLINE_WIDTH }: { values: number[]; color: string; width?: number }) {
   if (values.length < 2) return <View style={styles.sparklineEmpty} />;
 
   const min = Math.min(...values);
   const range = Math.max(...values) - min || 1;
   const points = values.map((value, index) => ({
-    x: (index / (values.length - 1)) * SPARKLINE_WIDTH,
+    x: (index / (values.length - 1)) * width,
     y: SPARKLINE_HEIGHT - 3 - ((value - min) / range) * (SPARKLINE_HEIGHT - 6),
   }));
 
   return (
-    <View accessibilityLabel="Last 30 one-minute candles" style={styles.sparkline}>
+    <View accessibilityLabel="Last 30 one-minute candles" style={[styles.sparkline, { width }]}>
       {points.slice(1).map((end, index) => {
         const start = points[index];
         const dx = end.x - start.x;
@@ -398,11 +454,19 @@ const styles = StyleSheet.create({
   muted: { color: AppColors.muted, fontSize: 13 },
   emptyWatchlist: { color: AppColors.muted, fontSize: 13, paddingVertical: 8 },
   watchlistError: { color: AppColors.danger, fontSize: 12 },
+  watchlist: { gap: 0 },
+  watchlistRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AppColors.hairline },
+  watchlistMain: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  watchlistName: { flex: 1, minWidth: 55 },
+  watchlistQuote: { alignItems: 'flex-end', minWidth: 66 },
+  watchlistPrice: { color: '#FFFFFF', fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  watchlistChange: { fontSize: 10, fontWeight: '600', fontVariant: ['tabular-nums'], marginTop: 3 },
   marketPrice: { color: '#fff', fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
   marketChange: { fontSize: 11, fontWeight: '600', fontVariant: ['tabular-nums'], marginTop: 4 },
   loader: { marginTop: 12 },
   marketGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   marketCard: { flexBasis: '48%', flexGrow: 1, minWidth: 0, maxWidth: 240, padding: 12, borderRadius: 8, backgroundColor: AppColors.surface, borderWidth: 1, borderColor: AppColors.hairline },
+  marketCardFull: { flexBasis: '100%', flexGrow: 1, maxWidth: '100%' },
   marketCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   coin: { width: 30, height: 30, borderRadius: 15, backgroundColor: AppColors.raised, alignItems: 'center', justifyContent: 'center' },
   coinText: { color: '#fff', fontWeight: '700', fontSize: 15 },
@@ -413,7 +477,7 @@ const styles = StyleSheet.create({
   watchButton: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
   marketCardQuote: { gap: 8, marginTop: 12 },
   marketCardChartRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
-  sparkline: { width: SPARKLINE_WIDTH, height: SPARKLINE_HEIGHT, overflow: 'hidden' },
+  sparkline: { height: SPARKLINE_HEIGHT, overflow: 'hidden' },
   sparklineEmpty: { width: SPARKLINE_WIDTH, height: SPARKLINE_HEIGHT, borderBottomWidth: 1, borderColor: AppColors.hairline },
   sparklineSegment: { position: 'absolute', height: 2, borderRadius: 1 },
 });
