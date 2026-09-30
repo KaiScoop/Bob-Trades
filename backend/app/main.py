@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -173,6 +173,83 @@ class BybitClient:
             {"category": "spot", "openOnly": "0", "limit": "50"},
         )
         return result.get("list", [])
+
+    def fetch_order_activity(
+        self,
+        product: Literal["stocks", "spot", "futures", "options"],
+        view: Literal["open", "history", "trades"],
+        cursor: str | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        if product == "stocks":
+            return {
+                "supported": False,
+                "message": "Stocks (TradFi) are not supported by the current Bybit integration.",
+                "records": [],
+                "count": 0,
+                "next_cursor": None,
+            }
+
+        categories = {
+            "spot": [("spot", {})],
+            "futures": [("linear", {"settleCoin": "USDT"}), ("inverse", {"settleCoin": "USD"})],
+            "options": [("option", {})],
+        }[product]
+        path = {
+            "open": "/v5/order/realtime",
+            "history": "/v5/order/history",
+            "trades": "/v5/execution/list",
+        }[view]
+
+        cursor_state: dict[str, str] = {}
+        if cursor:
+            try:
+                parsed_cursor = json.loads(cursor)
+            except json.JSONDecodeError as error:
+                raise ValueError("Invalid order activity cursor") from error
+            if not isinstance(parsed_cursor, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in parsed_cursor.items()
+            ):
+                raise ValueError("Invalid order activity cursor")
+            cursor_state = parsed_cursor
+
+        records: list[dict[str, Any]] = []
+        next_cursors: dict[str, str] = {}
+        for category, filters in categories:
+            if cursor and category not in cursor_state:
+                continue
+            params = {"category": category, "limit": str(limit), **filters}
+            if view == "open":
+                params["openOnly"] = "0"
+            elif view == "trades":
+                params["execType"] = "Trade"
+            if category in cursor_state:
+                params["cursor"] = cursor_state[category]
+
+            result = self._private_get(path, params)
+            page_records = result.get("list", [])
+            if isinstance(page_records, list):
+                records.extend(record for record in page_records if isinstance(record, dict))
+            next_page = result.get("nextPageCursor")
+            if isinstance(next_page, str) and next_page:
+                next_cursors[category] = next_page
+
+        timestamp_fields = ("createdTime", "execTime", "updatedTime")
+        records.sort(
+            key=lambda record: next(
+                (int(record[field]) for field in timestamp_fields if str(record.get(field, "")).isdigit()),
+                0,
+            ),
+            reverse=True,
+        )
+        return {
+            "supported": True,
+            "message": None,
+            "records": records,
+            "count": len(records),
+            "next_cursor": json.dumps(next_cursors, separators=(",", ":")) if next_cursors else None,
+        }
 
     def close_position(self, symbol: str) -> dict[str, Any]:
         raise NotImplementedError("Spot position closing is not implemented")
@@ -667,6 +744,25 @@ def get_orders(
     except (httpx.HTTPError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail="Bybit orders request failed") from error
     return {"orders": orders, "count": len(orders)}
+
+
+@app.get("/orders/{product}/{view}")
+def get_order_activity(
+    product: Literal["stocks", "spot", "futures", "options"],
+    view: Literal["open", "history", "trades"],
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=50),
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, Any]:
+    client = _get_user_client(user)
+    try:
+        return client.fetch_order_activity(product, view, cursor, limit)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except NotImplementedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    except (httpx.HTTPError, RuntimeError) as error:
+        raise HTTPException(status_code=502, detail="Bybit order activity request failed") from error
 
 
 @app.post("/agent/start")
