@@ -7,24 +7,24 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { AppText as Text, AppTextInput as TextInput } from '@/components/app-text';
 import { AppColors } from '@/constants/theme';
 import { api, type BrokerStatus } from '@/lib/api';
 
 type ConnectBybitModalProps = {
   visible: boolean;
+  initialMode?: ConnectionMode;
   onClose: () => void;
   onConnected: (broker: BrokerStatus) => void;
 };
 
 type ConnectionMode = 'testnet' | 'mainnet';
 
-export function ConnectBybitModal({ visible, onClose, onConnected }: ConnectBybitModalProps) {
-  const [mode, setMode] = useState<ConnectionMode>('testnet');
+export function ConnectBybitModal({ visible, initialMode = 'testnet', onClose, onConnected }: ConnectBybitModalProps) {
+  const [mode, setMode] = useState<ConnectionMode>(initialMode);
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [error, setError] = useState('');
@@ -35,7 +35,7 @@ export function ConnectBybitModal({ visible, onClose, onConnected }: ConnectBybi
     setApiKey('');
     setApiSecret('');
     setError('');
-    setMode('testnet');
+    setMode(initialMode);
     onClose();
   };
 
@@ -57,7 +57,7 @@ export function ConnectBybitModal({ visible, onClose, onConnected }: ConnectBybi
       });
       setApiKey('');
       setApiSecret('');
-      setMode('testnet');
+      setMode(initialMode);
       onConnected({ connected: true, mode: result.mode, balance: result.balance });
       onClose();
     } catch (connectionError) {

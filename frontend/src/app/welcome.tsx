@@ -1,12 +1,58 @@
 import { Link } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
+import { AppText as Text } from '@/components/app-text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-
 import { AppColors } from '@/constants/theme';
 
 export default function WelcomeScreen() {
-  return <SafeAreaView style={styles.container}><View style={styles.content}><View style={styles.mark}><View style={styles.pill} /><View style={styles.pill} /></View><Text style={styles.title}>Let Bob{`\n`}Trade</Text><Text style={styles.subtitle}>You set the risk. Bob takes the tape.</Text><View style={styles.actions}><Link href="/sign-up" asChild><LinearGradient colors={[AppColors.accent, AppColors.accentEnd]} style={styles.primary}><Text style={styles.primaryText}>Sign up</Text></LinearGradient></Link><Link href="/sign-in" asChild><View style={styles.secondary}><Text style={styles.secondaryText}>Sign in</Text></View></Link></View></View></SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.content}>
+        <View style={styles.intro}>
+          <Image
+            source={require('@/assets/images/bob-trades-logo.png')}
+            contentFit="contain"
+            style={styles.logo}
+            accessibilityLabel="Bob Trades logo"
+          />
+          <Text style={styles.title}>Your Journey Starts Here</Text>
+          <Text style={styles.subtitle}>
+            Discover a beginner-friendly platform built for simple, secure, and smart investing.
+          </Text>
+        </View>
+
+        <Link href="/sign-up" asChild>
+          <Pressable accessibilityRole="button" style={styles.button}>
+            <Text style={styles.buttonText}>Get Started</Text>
+          </Pressable>
+        </Link>
+      </View>
+    </SafeAreaView>
+  );
 }
 
-const styles = StyleSheet.create({ container: { flex: 1, backgroundColor: AppColors.background }, content: { flex: 1, padding: 28, justifyContent: 'center' }, mark: { width: 96, height: 96, borderRadius: 28, backgroundColor: '#fff', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 40 }, pill: { width: 14, height: 48, borderRadius: 9, backgroundColor: '#000' }, title: { color: '#fff', fontSize: 56, lineHeight: 58, fontWeight: '700', letterSpacing: -1 }, subtitle: { color: AppColors.muted, fontSize: 17, marginTop: 18 }, actions: { gap: 12, marginTop: 48 }, primary: { borderRadius: 24, padding: 17, alignItems: 'center' }, primaryText: { color: '#fff', fontSize: 16, fontWeight: '700' }, secondary: { borderColor: AppColors.hairline, borderWidth: 1, borderRadius: 24, padding: 17, alignItems: 'center' }, secondaryText: { color: '#fff', fontSize: 16, fontWeight: '600' } });
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: AppColors.background },
+  content: { flex: 1, paddingHorizontal: 18, paddingTop: 32, paddingBottom: 14 },
+  logo: { width: 260, height: 260, marginBottom: 12 },
+  intro: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 8 },
+  title: { color: '#FFFFFF', fontSize: 23, lineHeight: 30, fontWeight: '600', textAlign: 'center' },
+  subtitle: {
+    color: AppColors.muted,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: 10,
+    maxWidth: 330,
+  },
+  button: {
+    minHeight: 50,
+    borderRadius: 8,
+    backgroundColor: AppColors.accentEnd,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  buttonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
+});

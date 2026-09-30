@@ -5,14 +5,53 @@ const API_URL = Platform.OS === 'web'
   ? (process.env.EXPO_PUBLIC_WEB_API_URL ?? 'http://localhost:8080')
   : (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080');
 
-export type Portfolio = { mode: string; balance: number; asset: string };
+export type PortfolioAsset = { currency: string; total: number; available: number; locked: number; usd_value: number | null };
+export type Portfolio = { mode: string; balance: number; asset: string; equity: number | null; assets: PortfolioAsset[] };
+export type OrderProduct = 'stocks' | 'spot' | 'futures' | 'options';
+export type OrderView = 'open' | 'history' | 'trades';
+export type OrderActivity = {
+  supported: boolean;
+  message: string | null;
+  records: Record<string, unknown>[];
+  count: number;
+  next_cursor: string | null;
+};
 export type BrokerStatus = { connected: boolean; mode: string | null; balance: number };
 export type Session = { user_id: string; email: string };
-export type Profile = { user_id: string; username: string | null; dob: string | null };
+export type Profile = { user_id: string; username: string | null; dob: string | null; avatar_url: string | null };
 export type Position = { symbol: string; side: string; size: number; free?: number; locked?: number; usdValue?: number | null; [field: string]: unknown };
 export type AgentLog = { id: number; ts: string; latency_ms: number; request_json: Record<string, unknown>; response_json: Record<string, unknown>; intended: boolean; executed: boolean; reason: string };
-export type MarketTicker = { lastPrice?: string; price24hPcnt?: string; highPrice24h?: string; lowPrice24h?: string; turnover24h?: string };
+export type MarketTicker = {
+  lastPrice?: string;
+  price24hPcnt?: string;
+  highPrice24h?: string;
+  lowPrice24h?: string;
+  turnover24h?: string;
+  volume24h?: string;
+  openPrice?: string;
+  prevPrice24h?: string;
+  indexPrice?: string;
+  usdIndexPrice?: string;
+  markPrice?: string;
+  bid1Price?: string;
+  ask1Price?: string;
+  bid1Size?: string;
+  ask1Size?: string;
+  [field: string]: string | number | undefined;
+};
 export type MarketCandle = { ts: number; close: number; open: number; high: number; low: number; volume: number };
+export type MarketBook = {
+  bid?: number;
+  ask?: number;
+  spread_bps?: number;
+  mid?: number;
+  bid_depth_usdt_l1?: number;
+  ask_depth_usdt_l1?: number;
+  bid_depth_usdt_l10?: number;
+  ask_depth_usdt_l10?: number;
+  book_imbalance?: number;
+  [field: string]: number | string | undefined;
+};
 
 export function subscribeMarketPrices(
   symbols: string[],
@@ -112,11 +151,13 @@ export const api = {
   refresh: (refreshToken: string) => request<{ access_token: string; refresh_token: string }>('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }),
   getSession: () => request<Session>('/auth/session'),
   getProfile: () => request<Profile>('/me'),
-  updateProfile: (profile: { username: string; dob?: string }) => request<Profile>('/me', { method: 'PATCH', body: JSON.stringify(profile) }),
+  updateProfile: (profile: { username?: string; dob?: string; avatar_url?: string | null }) => request<Profile>('/me', { method: 'PATCH', body: JSON.stringify(profile) }),
   connectBybit: (payload: { mode: 'testnet' | 'mainnet'; api_key: string; api_secret: string }) => request<{ status: 'connected'; mode: string; balance: number }>('/broker/bybit', { method: 'POST', body: JSON.stringify(payload) }),
   disconnectBybit: () => request<{ deleted: boolean }>('/broker/bybit', { method: 'DELETE' }),
   getPositions: () => request<{ positions: Position[]; count: number }>('/positions'),
   getOrders: () => request<{ orders: Record<string, unknown>[]; count: number }>('/orders'),
+  getOrderActivity: (product: OrderProduct, view: OrderView, cursor?: string) =>
+    request<OrderActivity>(`/orders/${product}/${view}?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
   closePosition: (symbol: string) => request(`/positions/${symbol}/close`, { method: 'POST' }),
   updateTpsl: (symbol: string, tp: number, sl: number) => request(`/positions/${symbol}/tpsl`, { method: 'POST', body: JSON.stringify({ tp, sl }) }),
   getLogs: (limit = 50) => request<{ logs: AgentLog[] }>(`/agent/logs?limit=${limit}`),
@@ -124,6 +165,7 @@ export const api = {
   stopAgent: () => request('/agent/stop', { method: 'POST' }),
   getCandles: (symbol: string, tf: string) => request<{ candles: MarketCandle[] }>(`/markets/${symbol}/candles?tf=${tf}`),
   getIndicators: (symbol: string, tf: string) => request<{ indicators: Record<string, number> }>(`/markets/${symbol}/indicators?tf=${tf}`),
+  getBook: (symbol: string) => request<{ symbol: string; book: MarketBook }>(`/markets/${symbol}/book`),
   getMarkets: () => request<{ symbols: string[] }>('/markets'),
   getPortfolio: () => request<Portfolio>('/portfolio'),
   getBrokerStatus: () => request<BrokerStatus>('/broker/status'),

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { AppText as Text } from '@/components/app-text';
 
 import { AppColors } from '@/constants/theme';
 import type { MarketCandle } from '@/lib/api';

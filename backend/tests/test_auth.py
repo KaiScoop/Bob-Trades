@@ -320,7 +320,23 @@ def test_broker_connect_and_portfolio(monkeypatch):
             self.mode = mode
 
         def fetch_balance(self):
-            return {"info": {"totalWalletBalance": "1234.56"}, "USDT": {"free": 1234.56}}
+            return {
+                "info": {
+                    "result": {
+                        "list": [{
+                            "totalWalletBalance": "1299.00",
+                            "totalEquity": "1300.00",
+                            "coin": [
+                                {"coin": "USDT", "usdValue": "1244.56"},
+                                {"coin": "BTC", "usdValue": "55.44"},
+                            ],
+                        }],
+                    },
+                },
+                "USDT": {"free": 1234.56, "used": 10.0, "total": 1244.56},
+                "BTC": {"free": 0.001, "total": 0.0015},
+                "DOGE": {"free": 0.0, "used": 0.0, "total": 0.0},
+            }
 
     created_clients = []
 
@@ -352,6 +368,11 @@ def test_broker_connect_and_portfolio(monkeypatch):
     assert portfolio_response.status_code == 200
     assert portfolio_response.json()["balance"] == 1234.56
     assert portfolio_response.json()["mode"] == "testnet"
+    assert portfolio_response.json()["equity"] == 1300.0
+    assert portfolio_response.json()["assets"] == [
+        {"currency": "USDT", "total": 1244.56, "available": 1234.56, "locked": 10.0, "usd_value": 1244.56},
+        {"currency": "BTC", "total": 0.0015, "available": 0.001, "locked": 0.0005, "usd_value": 55.44},
+    ]
     assert created_clients[-1].api_key == "demo-key"
     assert created_clients[-1].api_secret == "demo-secret"
 
@@ -392,6 +413,87 @@ def test_bybit_client_reads_unified_balance_positions_and_orders(monkeypatch):
     assert all("X-BAPI-SIGN" in request[1]["headers"] for request in requests)
 
 
+def test_bybit_client_fetches_paginated_order_activity_by_product(monkeypatch):
+    client = BybitClient("testnet", "key", "secret")
+    requests = []
+
+    def fake_private_get(path, params):
+        requests.append((path, dict(params)))
+        category = params["category"]
+        cursor = params.get("cursor")
+        return {
+            "list": [{"symbol": category, "createdTime": "200" if category == "inverse" else "100"}],
+            "nextPageCursor": None if cursor else f"{category}-next",
+        }
+
+    monkeypatch.setattr(client, "_private_get", fake_private_get)
+
+    first_page = client.fetch_order_activity("futures", "history", None, 50)
+    assert first_page["supported"] is True
+    assert first_page["count"] == 2
+    assert [record["symbol"] for record in first_page["records"]] == ["inverse", "linear"]
+    assert requests[0][0] == "/v5/order/history"
+    assert requests[0][1]["category"] == "linear"
+    assert requests[0][1]["settleCoin"] == "USDT"
+    assert requests[1][1]["category"] == "inverse"
+    assert requests[1][1]["settleCoin"] == "USD"
+
+    second_page = client.fetch_order_activity("futures", "history", first_page["next_cursor"], 50)
+    assert second_page["count"] == 2
+    assert requests[2][1]["cursor"] == "linear-next"
+    assert requests[3][1]["cursor"] == "inverse-next"
+    assert second_page["next_cursor"] is None
+
+    client.fetch_order_activity("spot", "open", None, 50)
+    assert requests[4][0] == "/v5/order/realtime"
+    assert requests[4][1]["openOnly"] == "0"
+    client.fetch_order_activity("options", "trades", None, 50)
+    assert requests[5][0] == "/v5/execution/list"
+    assert requests[5][1]["category"] == "option"
+    assert requests[5][1]["execType"] == "Trade"
+
+    request_count = len(requests)
+    stocks = client.fetch_order_activity("stocks", "open", None, 50)
+    assert stocks["supported"] is False
+    assert stocks["records"] == []
+    assert len(requests) == request_count
+
+
+def test_order_activity_endpoint_returns_records_and_cursor(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-orders", "email": "orders@example.com"})),
+    )
+
+    class FakeBybitClient:
+        def fetch_order_activity(self, product, view, cursor, limit):
+            return {
+                "supported": True,
+                "message": None,
+                "records": [{"symbol": "BTCUSDT", "orderStatus": "New"}],
+                "count": 1,
+                "next_cursor": "page-two",
+            }
+
+    monkeypatch.setattr("app.main._get_user_client", lambda _user: FakeBybitClient())
+    response = TestClient(app).get(
+        "/orders/spot/open?limit=25",
+        headers={"Authorization": "Bearer user-access-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supported": True,
+        "message": None,
+        "records": [{"symbol": "BTCUSDT", "orderStatus": "New"}],
+        "count": 1,
+        "next_cursor": "page-two",
+    }
+
+
 def test_broker_status_requires_connection(monkeypatch):
     stub_supabase_storage(monkeypatch)
     monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
@@ -423,27 +525,77 @@ def test_me_profile_round_trip(monkeypatch):
     def fake_request(method, url, **kwargs):
         requests.append((method, url, kwargs))
         if method == "GET":
-            return httpx.Response(200, json=[{"user_id": "user-789", "username": "bob", "dob": "1999-01-01"}])
+            return httpx.Response(200, json=[{
+                "user_id": "user-789",
+                "username": "bob",
+                "dob": "1999-01-01",
+                "avatar_url": "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+            }])
         if method == "POST":
-            return httpx.Response(200, json=[{"user_id": "user-789", "username": "bobby", "dob": "2000-02-02"}])
+            return httpx.Response(200, json=[{
+                "user_id": "user-789",
+                "username": "bobby",
+                "dob": "2000-02-02",
+                "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+            }])
         return httpx.Response(200, json=[])
 
     monkeypatch.setattr("app.main.httpx.request", fake_request)
 
     get_response = TestClient(app).get("/me", headers={"Authorization": "Bearer user-access-token"})
     assert get_response.status_code == 200
-    assert get_response.json() == {"user_id": "user-789", "username": "bob", "dob": "1999-01-01"}
+    assert get_response.json() == {
+        "user_id": "user-789",
+        "username": "bob",
+        "dob": "1999-01-01",
+        "avatar_url": "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+    }
 
     patch_response = TestClient(app).patch(
         "/me",
         headers={"Authorization": "Bearer user-access-token"},
-        json={"username": "bobby", "dob": "2000-02-02"},
+        json={"username": "bobby", "dob": "2000-02-02", "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg"},
     )
     assert patch_response.status_code == 200
-    assert patch_response.json() == {"user_id": "user-789", "username": "bobby", "dob": "2000-02-02"}
+    assert patch_response.json() == {
+        "user_id": "user-789",
+        "username": "bobby",
+        "dob": "2000-02-02",
+        "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+    }
     assert requests[1][0] == "POST"
     assert requests[1][2]["headers"]["Prefer"] == "resolution=merge-duplicates,return=representation"
     assert requests[0][2]["headers"]["Authorization"] == "Bearer user-access-token"
+
+
+def test_me_assigns_random_default_avatar_when_missing(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "must-not-be-used")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-random-avatar", "email": "avatar@example.com"})),
+    )
+
+    requests = []
+
+    def fake_request(method, url, **kwargs):
+        requests.append((method, url, kwargs))
+        if method == "GET":
+            return httpx.Response(200, json=[{"user_id": "user-random-avatar", "username": "bob", "dob": "1999-01-01"}])
+        if method == "POST":
+            payload = kwargs["json"]
+            return httpx.Response(200, json=[{"user_id": "user-random-avatar", "username": payload["username"], "dob": payload["dob"], "avatar_url": payload["avatar_url"]}])
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr("app.main.httpx.request", fake_request)
+
+    response = TestClient(app).get("/me", headers={"Authorization": "Bearer user-access-token"})
+
+    assert response.status_code == 200
+    assert response.json()["avatar_url"] in main.DEFAULT_AVATAR_URLS
+    assert any(request[0] == "POST" for request in requests)
 
 
 def test_profile_endpoints_fail_cleanly_when_supabase_is_not_configured(monkeypatch):

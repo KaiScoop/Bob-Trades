@@ -111,7 +111,18 @@ Tabs, left to right:
 2. **Positions** — open positions + history; Close and edit TP/SL  
 3. **Trade** — pick coin, chart, risk, max %, Start / Stop Bob  
 4. **Activity** — Jev logs (time, reason, latency_ms, tap for JSON)  
-5. **Profile** — account, Bybit connect/disconnect, sign out
+5. **Profile** — account identity, Bybit connection, detailed portfolio holdings,
+   equity and available USDT, per-asset allocation, local privacy/display settings,
+   and sign out
+
+Market detail pages show the selected coin's live price, 24-hour ticker data,
+price history, cached order-book spread/depth metrics, and calculated technical
+indicators. The detail page's **Trade** action opens the Trade tab with that
+symbol selected; risk and capital allocation remain configurable there.
+
+Profile settings currently include device-local balance masking and filtering
+holdings valued below $1.00. The selected Bybit network and credential management
+remain account actions. Display preferences are not uploaded to the backend.
 
 Auth today: **email magic link** (no password).  
 `POST /auth/signup` and `POST /auth/signin` send a link. After the user opens it, the app stores the Supabase access token and calls our API with `Authorization: Bearer …`.
@@ -130,7 +141,8 @@ Exact API symbols (do not send `ETH-USD`):
 BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT ADAUSDT LINKUSDT
 ```
 
-Icons: bundle locally. Source pattern:
+Market and portfolio coin marks use the jsDelivr coin-logo source pattern, with
+initial-based fallbacks for unmapped or unavailable logos:
 
 ```
 https://cdn.jsdelivr.net/gh/simplr-sh/coin-logos/images/{id}/standard.png
@@ -173,7 +185,7 @@ Bob-Trades/
     common/         Bybit, Redis, shared types
     API.md          contract for the app
     compose.yaml
-  frontend/         Expo app              ← still catching up to API.md
+  frontend/         Expo app              ← screens consume backend/API.md
   PLAN-backend.md
   PLAN-mobile.md
 ```
@@ -192,7 +204,7 @@ Implemented (mocked tests pass; live testnet smoke still required):
 - Profile get/patch  
 - Bybit connect / status / disconnect, secrets Fernet-encrypted  
 - Portfolio, positions, orders reads  
-- Market list, candles, indicators  
+- Market list, candles, indicators, cached order-book metrics
 - Stream endpoint for live chart updates  
 - Agent start / stop / logs  
 - Close position, update TP/SL  
@@ -205,7 +217,7 @@ Not done / not proven live:
 - Real Bybit + Jev + Supabase smoke test on testnet  
 - Production WS market feed (polling is fine for v1)  
 - Mainnet hardening (rate limits, metrics, secret rotation)  
-- Frontend fully wired to a running API  
+- Device-level and live-service verification of all frontend flows
 
 **Do not turn on mainnet** (`LIVE_ARMED` / `arm_live`) until a testnet fill has been seen on Bybit’s own site.
 
@@ -213,7 +225,9 @@ Not done / not proven live:
 
 ## 9. Frontend status
 
-Expo + TypeScript app exists. Design and screen plan are in `PLAN-frontend.md` / conversation. The friend should implement against **`backend/API.md`**, not invent routes.
+Expo + TypeScript app consumes the documented backend endpoints. The API contract
+is in **`backend/API.md`**; add new backend data there before wiring new frontend
+features. Device-level verification against configured services is still needed.
 
 While `/stream` is flaky, poll candles every ~5 seconds. Charts: TradingView Lightweight Charts.
 

@@ -31,8 +31,8 @@ export const AppColors = {
   hairline: '#1F1F1F',
   muted: '#A1A1AA',
   faint: '#71717A',
-  accent: '#0C31B3',
-  accentEnd: '#0947BD',
+  accent: '#0081FB',
+  accentEnd: '#0081FB',
   success: '#22C55E',
   danger: '#EF4444',
 } as const;
@@ -41,23 +41,40 @@ export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
+    sans: 'GoogleSansFlex_400Regular',
+    sansMedium: 'GoogleSansFlex_500Medium',
+    sansSemiBold: 'GoogleSansFlex_600SemiBold',
+    sansBold: 'GoogleSansFlex_700Bold',
+    display: 'InstrumentSans_400Regular',
+    displayMedium: 'InstrumentSans_500Medium',
+    displaySemiBold: 'InstrumentSans_600SemiBold',
+    displayBold: 'InstrumentSans_700Bold',
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
-    sans: 'normal',
+    sans: 'GoogleSansFlex_400Regular',
+    sansMedium: 'GoogleSansFlex_500Medium',
+    sansSemiBold: 'GoogleSansFlex_600SemiBold',
+    sansBold: 'GoogleSansFlex_700Bold',
+    display: 'InstrumentSans_400Regular',
+    displayMedium: 'InstrumentSans_500Medium',
+    displaySemiBold: 'InstrumentSans_600SemiBold',
+    displayBold: 'InstrumentSans_700Bold',
     serif: 'serif',
     rounded: 'normal',
     mono: 'monospace',
   },
   web: {
-    sans: 'var(--font-display)',
+    sans: 'var(--font-sans)',
+    sansMedium: 'GoogleSansFlex_500Medium',
+    sansSemiBold: 'GoogleSansFlex_600SemiBold',
+    sansBold: 'GoogleSansFlex_700Bold',
+    display: 'var(--font-display)',
+    displayMedium: 'InstrumentSans_500Medium',
+    displaySemiBold: 'InstrumentSans_600SemiBold',
+    displayBold: 'InstrumentSans_700Bold',
     serif: 'var(--font-serif)',
     rounded: 'var(--font-rounded)',
     mono: 'var(--font-mono)',

@@ -6,9 +6,10 @@ import hmac
 import json
 import logging
 import os
+import random
 import time
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -67,9 +68,23 @@ class AuthRefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+DEFAULT_AVATAR_URLS = [
+    "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+    "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+    "https://i.pinimg.com/736x/a6/fe/b7/a6feb7bac92723e3940999e610b6773a.jpg",
+    "https://i.pinimg.com/736x/fb/ae/69/fbae698674f40b5b3bd97e4399fb19ed.jpg",
+    "https://i.pinimg.com/736x/92/46/33/9246333f7d3625fac1ba1267a7d18dff.jpg",
+]
+
+
+def _random_avatar_url() -> str:
+    return random.choice(DEFAULT_AVATAR_URLS)
+
+
 class ProfilePatchRequest(BaseModel):
     username: str | None = None
     dob: str | None = None
+    avatar_url: str | None = None
 
 
 class AgentStartRequest(BaseModel):
@@ -174,6 +189,83 @@ class BybitClient:
         )
         return result.get("list", [])
 
+    def fetch_order_activity(
+        self,
+        product: Literal["stocks", "spot", "futures", "options"],
+        view: Literal["open", "history", "trades"],
+        cursor: str | None,
+        limit: int,
+    ) -> dict[str, Any]:
+        if product == "stocks":
+            return {
+                "supported": False,
+                "message": "Stocks (TradFi) are not supported by the current Bybit integration.",
+                "records": [],
+                "count": 0,
+                "next_cursor": None,
+            }
+
+        categories = {
+            "spot": [("spot", {})],
+            "futures": [("linear", {"settleCoin": "USDT"}), ("inverse", {"settleCoin": "USD"})],
+            "options": [("option", {})],
+        }[product]
+        path = {
+            "open": "/v5/order/realtime",
+            "history": "/v5/order/history",
+            "trades": "/v5/execution/list",
+        }[view]
+
+        cursor_state: dict[str, str] = {}
+        if cursor:
+            try:
+                parsed_cursor = json.loads(cursor)
+            except json.JSONDecodeError as error:
+                raise ValueError("Invalid order activity cursor") from error
+            if not isinstance(parsed_cursor, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in parsed_cursor.items()
+            ):
+                raise ValueError("Invalid order activity cursor")
+            cursor_state = parsed_cursor
+
+        records: list[dict[str, Any]] = []
+        next_cursors: dict[str, str] = {}
+        for category, filters in categories:
+            if cursor and category not in cursor_state:
+                continue
+            params = {"category": category, "limit": str(limit), **filters}
+            if view == "open":
+                params["openOnly"] = "0"
+            elif view == "trades":
+                params["execType"] = "Trade"
+            if category in cursor_state:
+                params["cursor"] = cursor_state[category]
+
+            result = self._private_get(path, params)
+            page_records = result.get("list", [])
+            if isinstance(page_records, list):
+                records.extend(record for record in page_records if isinstance(record, dict))
+            next_page = result.get("nextPageCursor")
+            if isinstance(next_page, str) and next_page:
+                next_cursors[category] = next_page
+
+        timestamp_fields = ("createdTime", "execTime", "updatedTime")
+        records.sort(
+            key=lambda record: next(
+                (int(record[field]) for field in timestamp_fields if str(record.get(field, "")).isdigit()),
+                0,
+            ),
+            reverse=True,
+        )
+        return {
+            "supported": True,
+            "message": None,
+            "records": records,
+            "count": len(records),
+            "next_cursor": json.dumps(next_cursors, separators=(",", ":")) if next_cursors else None,
+        }
+
     def close_position(self, symbol: str) -> dict[str, Any]:
         raise NotImplementedError("Spot position closing is not implemented")
 
@@ -239,6 +331,15 @@ def get_market_indicators(
         "symbol": normalized,
         "tf": tf,
         "indicators": _market_cache(f"ind:{normalized}:{tf}"),
+    }
+
+
+@app.get("/markets/{symbol}/book")
+def get_market_book(symbol: str) -> dict[str, object]:
+    normalized = _ensure_symbol(symbol)
+    return {
+        "symbol": normalized,
+        "book": _market_cache(f"mkt:{normalized}:book"),
     }
 
 
@@ -451,6 +552,64 @@ def _cached_usdt_free(snapshot: dict[str, Any]) -> float:
     return float((snapshot.get("balance", {}).get("USDT") or {}).get("free") or 0.0)
 
 
+def _portfolio_details(mode: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    balance = snapshot.get("balance")
+    if not isinstance(balance, dict):
+        balance = {}
+
+    info = balance.get("info")
+    if not isinstance(info, dict):
+        info = {}
+    result = info.get("result")
+    account_list = result.get("list") if isinstance(result, dict) else None
+    account_summary = account_list[0] if isinstance(account_list, list) and account_list else {}
+    if not isinstance(account_summary, dict):
+        account_summary = {}
+
+    equity_value = info.get("totalEquity") or info.get("totalWalletBalance")
+    if equity_value is None:
+        equity_value = account_summary.get("totalEquity") or account_summary.get("totalWalletBalance")
+
+    usd_values: dict[str, float] = {}
+    coin_details = account_summary.get("coin")
+    if isinstance(coin_details, list):
+        for coin in coin_details:
+            if not isinstance(coin, dict) or coin.get("usdValue") is None:
+                continue
+            currency = coin.get("coin")
+            if isinstance(currency, str):
+                usd_values[currency] = float(coin["usdValue"])
+
+    metadata_keys = {"free", "used", "total", "info", "timestamp", "datetime"}
+    assets: list[dict[str, float | str | None]] = []
+    for currency, amounts in balance.items():
+        if currency in metadata_keys or not isinstance(amounts, dict):
+            continue
+        available = float(amounts.get("free") or 0.0)
+        used_value = amounts.get("used")
+        total_value = amounts.get("total")
+        total = float(total_value) if total_value is not None else available + float(used_value or 0.0)
+        locked = float(used_value) if used_value is not None else max(total - available, 0.0)
+        if total <= 0:
+            continue
+        assets.append({
+            "currency": currency,
+            "total": total,
+            "available": available,
+            "locked": locked,
+            "usd_value": usd_values.get(currency),
+        })
+    assets.sort(key=lambda item: (item["currency"] != "USDT", str(item["currency"])))
+
+    return {
+        "mode": mode,
+        "balance": _cached_usdt_free({"balance": balance}),
+        "asset": "USDT",
+        "equity": float(equity_value) if equity_value is not None else None,
+        "assets": assets,
+    }
+
+
 def _refresh_portfolio(user: AuthenticatedUser, mode: str, broker: BybitSpotExecution, symbol: str) -> None:
     balance = broker.fetch_balance()
     holdings = broker.fetch_holdings(symbol)
@@ -462,11 +621,31 @@ def get_me(user: AuthenticatedUser = Depends(get_authenticated_user)) -> dict[st
     response = _supabase_request(
         user,
         "GET",
-        f"profiles?user_id=eq.{user.id}&select=user_id,username,dob",
+        f"profiles?user_id=eq.{user.id}&select=user_id,username,dob,avatar_url",
         headers={"Accept": "application/json"},
     )
     rows = response.json()
-    profile = rows[0] if rows else {"user_id": user.id, "username": None, "dob": None}
+    profile = rows[0] if rows else {"user_id": user.id, "username": None, "dob": None, "avatar_url": _random_avatar_url()}
+    missing_avatar = not bool(profile.get("avatar_url"))
+    if missing_avatar:
+        profile["avatar_url"] = _random_avatar_url()
+    if not rows or missing_avatar:
+        _supabase_request(
+            user,
+            "POST",
+            "profiles?on_conflict=user_id",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            },
+            json={
+                "user_id": user.id,
+                "username": profile.get("username"),
+                "dob": profile.get("dob"),
+                "avatar_url": profile["avatar_url"],
+            },
+        )
     return profile
 
 
@@ -480,6 +659,8 @@ def patch_me(
         data["username"] = body.username
     if body.dob is not None:
         data["dob"] = body.dob
+    if body.avatar_url is not None:
+        data["avatar_url"] = body.avatar_url
     if not data:
         return get_me(user)
     data["user_id"] = user.id
@@ -568,11 +749,7 @@ def portfolio(
 
     cached = _portfolio_cache(user.id, connection["mode"])
     if cached is not None:
-        return {
-            "mode": connection["mode"],
-            "balance": _cached_usdt_free(cached),
-            "asset": "USDT",
-        }
+        return _portfolio_details(connection["mode"], cached)
 
     client = create_bybit_client(
         connection["mode"],
@@ -584,11 +761,7 @@ def portfolio(
     except (httpx.HTTPError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail="Bybit balance request failed") from error
     _cache_portfolio(user.id, connection["mode"], balance)
-    return {
-        "mode": connection["mode"],
-        "balance": float(balance.get("USDT", {}).get("free", 0.0) or 0.0),
-        "asset": "USDT",
-    }
+    return _portfolio_details(connection["mode"], {"balance": balance})
 
 
 @app.get("/positions")
@@ -617,6 +790,25 @@ def get_orders(
     except (httpx.HTTPError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail="Bybit orders request failed") from error
     return {"orders": orders, "count": len(orders)}
+
+
+@app.get("/orders/{product}/{view}")
+def get_order_activity(
+    product: Literal["stocks", "spot", "futures", "options"],
+    view: Literal["open", "history", "trades"],
+    cursor: str | None = None,
+    limit: int = Query(default=50, ge=1, le=50),
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, Any]:
+    client = _get_user_client(user)
+    try:
+        return client.fetch_order_activity(product, view, cursor, limit)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except NotImplementedError as error:
+        raise HTTPException(status_code=501, detail=str(error)) from error
+    except (httpx.HTTPError, RuntimeError) as error:
+        raise HTTPException(status_code=502, detail="Bybit order activity request failed") from error
 
 
 @app.post("/agent/start")

@@ -1,56 +1,59 @@
-# Welcome to your Expo app 👋
+# Bob Trades Frontend
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The Bob Trades mobile and web client is built with Expo, React Native,
+TypeScript, and Expo Router. It uses the FastAPI backend contract in
+[`../backend/API.md`](../backend/API.md); the app does not connect directly to
+Bybit, Supabase PostgREST, Redis, or the worker.
 
-## Get started
+## Setup
 
-1. Install dependencies
+Install dependencies from this directory:
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```sh
+npm install
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The API defaults to `http://localhost:8080`. Override it in the local Expo
+environment when the API runs elsewhere:
 
-### Other setup steps
+```text
+EXPO_PUBLIC_API_URL=http://localhost:8080
+EXPO_PUBLIC_WEB_API_URL=http://localhost:8080
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Native clients use `EXPO_PUBLIC_API_URL`; web uses
+`EXPO_PUBLIC_WEB_API_URL`.
 
-## Learn more
+Start Expo:
 
-To learn more about developing your project with Expo, look at the following resources:
+```sh
+npx expo start
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+For web, run `npx expo start --web`. The backend API and worker setup is
+documented in [`../backend/README.md`](../backend/README.md).
 
-## Join the community
+## App areas
 
-Join our community of developers creating universal apps.
+- **Home**: market list, live prices, movers, and watchlist.
+- **Market detail**: ticker stats, price chart, cached order-book depth, and
+  calculated technical indicators. The Trade action opens trade setup with the
+  selected market.
+- **Trade**: choose the asset, risk profile, and capital percentage before
+  starting or stopping Bob.
+- **Positions and Activity**: inspect holdings, orders, and agent decisions.
+- **Profile**: account and broker controls, account equity, available funds,
+  asset values and allocation, plus device-local display settings.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+The profile settings mask displayed quantities/values or filter holdings valued
+below `$1.00`. Those preferences are stored locally and are not sent to the API.
+Sign-out clears the stored authentication tokens. Bybit credentials are entered
+only through the backend connection API and are never stored in frontend
+preferences.
+
+## Validation
+
+```sh
+npx tsc --noEmit
+npx expo lint
+```

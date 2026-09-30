@@ -29,8 +29,8 @@ them and send the access token in the `Authorization` header. Send refresh
 tokens only in the JSON body of `POST /auth/refresh`, never in a URL.
 
 Public routes are `POST /auth/signup`, `POST /auth/signin`, `GET /health`,
-`GET /markets`, the market candle and indicator routes, and `GET /stream`. All
-other routes require authentication.
+`GET /markets`, the market candle, indicator, and order-book routes, and
+`GET /stream`. All other routes require authentication.
 
 Common authentication failures:
 
@@ -113,6 +113,35 @@ checks pass and `503` when the API is degraded.
 `ts` is Unix milliseconds. Market data may be unavailable until the worker has
 populated Redis; that condition returns `503`.
 
+### `GET /markets/{symbol}/book`
+
+Returns the most recently cached Bybit spot order-book summary. The worker
+collects up to 25 bid and ask levels; the depth metrics below summarize the top
+one or ten levels. Values are refreshed with the fast market polling cycle.
+
+```json
+{
+  "symbol": "BTCUSDT",
+  "book": {
+    "bid": 100.0,
+    "ask": 100.1,
+    "spread_bps": 9.995,
+    "mid": 100.05,
+    "bid_depth_usdt_l1": 1000.0,
+    "ask_depth_usdt_l1": 801.0,
+    "bid_depth_usdt_l10": 15000.0,
+    "ask_depth_usdt_l10": 12000.0,
+    "book_imbalance": 0.111
+  }
+}
+```
+
+`bid` and `ask` are the best prices; `spread_bps` is the bid/ask spread as
+basis points of the midpoint. Depth fields are quote-value (USDT) sums. The
+book imbalance is the difference between top-10 bid and ask base quantities,
+divided by their combined quantity; positive values indicate more bid quantity.
+Market cache misses return `503`.
+
 ### `GET /markets/{symbol}/indicators?tf=1m`
 
 ```json
@@ -124,14 +153,44 @@ populated Redis; that condition returns `503`.
     "ema20": 100.2,
     "ema50": 99.8,
     "macd": 0.12,
-    "macd_signal": 0.09,
-    "atr14": 1.4
+    "signal": 0.09,
+    "atr14": 1.4,
+    "atr_pct": 0.014,
+    "realized_vol_20": 0.003,
+    "vwma_20": 100.1,
+    "average_directional_index_14": 18.4
   }
 }
 ```
 
-The indicator object can gain additional calculated fields. Frontend consumers
-should ignore unknown fields.
+The indicator object is timeframe-specific and can include `null` while a
+calculation is warming up or lacks enough closed candles. It currently includes:
+
+- Moving averages: `ema_10`, `ema_20`, `ema_30`, `ema_50`, `ema_100`,
+  `ema_200`, matching `sma_*` fields, `vwma_20`, `hull_ma_9`, and
+  `ichimoku_base_line_9_26_52_26`.
+- Momentum/oscillators: `relative_strength_index_14`, `rsi14`, `rsi`,
+  `stochastic_percent_k_14_3_3`, `stochastic_rsi_fast_3_3_14_14`,
+  `commodity_channel_index_20`, `williams_percent_range_14`,
+  `ultimate_oscillator_7_14_28`, `awesome_oscillator`, `momentum_10`, and
+  `bull_bear_power`.
+- Trend/volatility: `average_directional_index_14`, `macd_level_12_26`,
+  `macd`, `signal`, `atr14`, `atr_pct`, and `realized_vol_20`.
+- Compatibility aliases: `ema_fast`, `ema_slow`, `ema20`, and `sma50`.
+
+`atr_pct` is ATR divided by the latest close. `realized_vol_20` is the rolling
+standard deviation of log returns over 20 candles. Consumers should ignore
+unknown fields so additional calculations can be added without breaking clients.
+
+### Ticker fields
+
+`GET /stream` includes the raw Bybit spot ticker object as `ticker`; the
+multi-symbol form includes the same object for each market in `markets[]`.
+Available spot fields include `symbol`, `bid1Price`, `bid1Size`, `ask1Price`,
+`ask1Size`, `lastPrice`, `prevPrice24h`, `price24hPcnt`, `highPrice24h`,
+`lowPrice24h`, `turnover24h`, `volume24h`, and `usdIndexPrice`. Values are
+provided as strings by Bybit. A field may be absent for an endpoint/category;
+clients should display an unavailable value rather than infer it.
 
 ### `GET /stream?symbol=BTCUSDT&tf=1m`
 
@@ -218,17 +277,20 @@ The response contains Supabase's token response, including the new
 ### `GET /me`
 
 ```json
-{"user_id":"auth-user-id","username":"bob","dob":"1990-01-01"}
+{"user_id":"auth-user-id","username":"bob","dob":"1990-01-01","avatar_url":"https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg"}
 ```
 
-A new profile returns `username: null` and `dob: null`.
+A new profile returns `username: null`, `dob: null`, and a randomly assigned `avatar_url`.
+The initial avatar is selected from the server's configured default-avatar list
+when the profile row is created. Later profile reads return the stored URL; the
+client can replace it through `PATCH /me`.
 
 ### `PATCH /me`
 
 Request fields are optional; send only fields being changed:
 
 ```json
-{"username":"bob","dob":"1990-01-01"}
+{"username":"bob","dob":"1990-01-01","avatar_url":"https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg"}
 ```
 
 Response is the stored profile in the same shape as `GET /me`.
@@ -272,8 +334,30 @@ portfolio.
 ### `GET /portfolio`
 
 ```json
-{"mode":"testnet","balance":100.0,"asset":"USDT"}
+{
+  "mode": "testnet",
+  "balance": 100.0,
+  "asset": "USDT",
+  "equity": 165.0,
+  "assets": [
+    {"currency": "USDT", "total": 100.0, "available": 100.0, "locked": 0.0, "usd_value": 100.0},
+    {"currency": "BTC", "total": 0.001, "available": 0.001, "locked": 0.0, "usd_value": 65.0}
+  ]
+}
 ```
+
+`balance` is available USDT. `equity` is the account equity reported by Bybit,
+or `null` when the exchange does not include it. `assets` contains nonzero
+balances with available and locked quantities. `usd_value` is Bybit's reported
+USD value for the asset, or `null` when unavailable. The profile UI displays
+assets sorted by reported USD value and their share of account equity. If
+`equity` is `null`, the UI falls back to the sum of available reported asset
+values for the headline total. It keeps assets whose `usd_value` is `null`
+visible even when the optional small-balance filter is enabled.
+
+Portfolio privacy and the `$1.00` small-balance filter are client-side display
+preferences stored on the device; they do not change this response or update
+server-side account settings.
 
 ### `GET /positions`
 
@@ -296,6 +380,25 @@ payload:
 ```
 
 The frontend should treat unknown order fields as optional.
+
+### `GET /orders/{product}/{view}`
+
+Fetches a page of Bybit order activity while preserving every raw record field.
+`product` is `stocks`, `spot`, `futures`, or `options`; `view` is `open`,
+`history`, or `trades`. Pass `next_cursor` back as the `cursor` query parameter
+to load the next page. Futures combines linear USDT-settled and inverse
+USD-settled records. The `stocks` product returns `supported: false` because
+the current Bybit integration does not support TradFi stock order APIs.
+
+```json
+{
+  "supported": true,
+  "message": null,
+  "records": [{"symbol": "BTCUSDT", "side": "Buy", "orderStatus": "New"}],
+  "count": 1,
+  "next_cursor": null
+}
+```
 
 ## Agent
 
@@ -396,8 +499,9 @@ Response:
 1. Authenticate with Supabase Auth and retain its access token securely.
 2. Call `GET /auth/session` to verify the API session.
 3. Call `GET /markets` and use an exact returned symbol.
-4. Bootstrap charts with `GET /markets/{symbol}/candles` and indicators with
-   `GET /markets/{symbol}/indicators`.
+4. Bootstrap charts with `GET /markets/{symbol}/candles`, indicators with
+  `GET /markets/{symbol}/indicators`, and market-detail depth with
+  `GET /markets/{symbol}/book`. Use `/stream` for ticker updates.
 5. Connect Bybit through `POST /broker/bybit`; never send credentials anywhere
    except this API route.
 6. Read `GET /portfolio` before showing the start-agent action.

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { AppText as Text } from '@/components/app-text';
 
 import { AppColors } from '@/constants/theme';
 import type { MarketCandle } from '@/lib/api';
