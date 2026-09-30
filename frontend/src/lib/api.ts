@@ -18,7 +18,7 @@ export type OrderActivity = {
 };
 export type BrokerStatus = { connected: boolean; mode: string | null; balance: number };
 export type Session = { user_id: string; email: string };
-export type Profile = { user_id: string; username: string | null; dob: string | null };
+export type Profile = { user_id: string; username: string | null; dob: string | null; avatar_url: string | null };
 export type Position = { symbol: string; side: string; size: number; free?: number; locked?: number; usdValue?: number | null; [field: string]: unknown };
 export type AgentLog = { id: number; ts: string; latency_ms: number; request_json: Record<string, unknown>; response_json: Record<string, unknown>; intended: boolean; executed: boolean; reason: string };
 export type MarketTicker = { lastPrice?: string; price24hPcnt?: string; highPrice24h?: string; lowPrice24h?: string; turnover24h?: string };
@@ -122,7 +122,7 @@ export const api = {
   refresh: (refreshToken: string) => request<{ access_token: string; refresh_token: string }>('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }),
   getSession: () => request<Session>('/auth/session'),
   getProfile: () => request<Profile>('/me'),
-  updateProfile: (profile: { username: string; dob?: string }) => request<Profile>('/me', { method: 'PATCH', body: JSON.stringify(profile) }),
+  updateProfile: (profile: { username?: string; dob?: string; avatar_url?: string | null }) => request<Profile>('/me', { method: 'PATCH', body: JSON.stringify(profile) }),
   connectBybit: (payload: { mode: 'testnet' | 'mainnet'; api_key: string; api_secret: string }) => request<{ status: 'connected'; mode: string; balance: number }>('/broker/bybit', { method: 'POST', body: JSON.stringify(payload) }),
   disconnectBybit: () => request<{ deleted: boolean }>('/broker/bybit', { method: 'DELETE' }),
   getPositions: () => request<{ positions: Position[]; count: number }>('/positions'),
