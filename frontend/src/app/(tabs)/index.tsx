@@ -9,7 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppColors } from '@/constants/theme';
 import { cryptoLogoUrl } from '@/constants/crypto';
 import { ConnectBybitModal } from '@/components/connect-bybit-modal';
-import { api, subscribeMarketPrices, type BrokerStatus, type MarketTicker, type Portfolio } from '@/lib/api';
+import { api, subscribeMarketPrices, type BrokerStatus, type MarketTicker } from '@/lib/api';
 import { loadWatchlist, saveWatchlist } from '@/lib/watchlist';
 
 const ASSET_NAMES: Record<string, string> = {
@@ -47,7 +47,6 @@ function trendColor(change: number | null) {
 
 export default function HomeScreen() {
   const [symbols, setSymbols] = useState<string[]>([]);
-  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [broker, setBroker] = useState<BrokerStatus | null>(null);
   const [username, setUsername] = useState('');
   const [userId, setUserId] = useState('');
@@ -91,8 +90,8 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!sessionReady) return;
     let active = true;
-    Promise.allSettled([api.getMarkets(), api.getPortfolio(), api.getBrokerStatus()])
-      .then(([marketsResult, portfolioResult, brokerResult]) => {
+    Promise.allSettled([api.getMarkets(), api.getBrokerStatus()])
+      .then(([marketsResult, brokerResult]) => {
         if (!active) return;
         if (marketsResult.status === 'fulfilled') {
           const availableSymbols = marketsResult.value.symbols;
@@ -109,7 +108,6 @@ export default function HomeScreen() {
         } else {
           setError(true);
         }
-        if (portfolioResult.status === 'fulfilled') setPortfolio(portfolioResult.value);
         if (brokerResult.status === 'fulfilled') setBroker(brokerResult.value);
         else setBroker({ connected: false, mode: null, balance: 0 });
       })
@@ -163,12 +161,6 @@ export default function HomeScreen() {
               mode={activeMode}
               onToggle={() => openNetwork(activeMode === 'mainnet' ? 'testnet' : 'mainnet')}
             />
-          </View>
-          <Text style={styles.sectionLabel}>PORTFOLIO</Text>
-          <View style={styles.portfolioCard}>
-            <Text style={styles.cardMuted}>Available balance</Text>
-            <Text style={styles.balance}>{portfolio ? `$${portfolio.balance.toFixed(2)}` : '--'}</Text>
-            <Text style={styles.asset}>{portfolio?.asset ?? 'USDT'}</Text>
           </View>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Watchlist</Text>
@@ -263,7 +255,6 @@ export default function HomeScreen() {
           onClose={() => setConnectOpen(false)}
           onConnected={(connection) => {
             setBroker(connection);
-            setPortfolio({ mode: connection.mode ?? 'testnet', balance: connection.balance, asset: 'USDT' });
           }}
         />
       </SafeAreaView>
@@ -459,10 +450,7 @@ const styles = StyleSheet.create({
   networkText: { color: AppColors.muted, fontSize: 10, fontWeight: '700' },
   networkTextMain: { color: '#FFFFFF' },
   sectionLabel: { color: AppColors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
-  portfolioCard: { borderRadius: 12, padding: 20, minHeight: 142, backgroundColor: AppColors.accentEnd },
   cardMuted: { color: '#C7D2FE', fontSize: 13 },
-  balance: { color: '#fff', fontSize: 36, fontWeight: '700', marginTop: 12 },
-  asset: { color: '#C7D2FE', fontSize: 13, marginTop: 4 },
   connectBanner: { backgroundColor: AppColors.surface, borderColor: AppColors.hairline, borderWidth: 1, borderRadius: 8, padding: 16, position: 'relative', marginTop: 8 },
   connectTitle: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 5 },
   arrow: { position: 'absolute', right: 18, top: 22, color: '#fff', fontSize: 28 },
