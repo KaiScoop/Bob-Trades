@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import random
 import time
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -67,9 +68,23 @@ class AuthRefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=1)
 
 
+DEFAULT_AVATAR_URLS = [
+    "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+    "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+    "https://i.pinimg.com/736x/a6/fe/b7/a6feb7bac92723e3940999e610b6773a.jpg",
+    "https://i.pinimg.com/736x/fb/ae/69/fbae698674f40b5b3bd97e4399fb19ed.jpg",
+    "https://i.pinimg.com/736x/92/46/33/9246333f7d3625fac1ba1267a7d18dff.jpg",
+]
+
+
+def _random_avatar_url() -> str:
+    return random.choice(DEFAULT_AVATAR_URLS)
+
+
 class ProfilePatchRequest(BaseModel):
     username: str | None = None
     dob: str | None = None
+    avatar_url: str | None = None
 
 
 class AgentStartRequest(BaseModel):
@@ -597,11 +612,31 @@ def get_me(user: AuthenticatedUser = Depends(get_authenticated_user)) -> dict[st
     response = _supabase_request(
         user,
         "GET",
-        f"profiles?user_id=eq.{user.id}&select=user_id,username,dob",
+        f"profiles?user_id=eq.{user.id}&select=user_id,username,dob,avatar_url",
         headers={"Accept": "application/json"},
     )
     rows = response.json()
-    profile = rows[0] if rows else {"user_id": user.id, "username": None, "dob": None}
+    profile = rows[0] if rows else {"user_id": user.id, "username": None, "dob": None, "avatar_url": _random_avatar_url()}
+    missing_avatar = not bool(profile.get("avatar_url"))
+    if missing_avatar:
+        profile["avatar_url"] = _random_avatar_url()
+    if not rows or missing_avatar:
+        _supabase_request(
+            user,
+            "POST",
+            "profiles?on_conflict=user_id",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            },
+            json={
+                "user_id": user.id,
+                "username": profile.get("username"),
+                "dob": profile.get("dob"),
+                "avatar_url": profile["avatar_url"],
+            },
+        )
     return profile
 
 
@@ -615,6 +650,8 @@ def patch_me(
         data["username"] = body.username
     if body.dob is not None:
         data["dob"] = body.dob
+    if body.avatar_url is not None:
+        data["avatar_url"] = body.avatar_url
     if not data:
         return get_me(user)
     data["user_id"] = user.id
