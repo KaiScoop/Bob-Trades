@@ -5,7 +5,8 @@ const API_URL = Platform.OS === 'web'
   ? (process.env.EXPO_PUBLIC_WEB_API_URL ?? 'http://localhost:8080')
   : (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080');
 
-export type Portfolio = { mode: string; balance: number; asset: string };
+export type PortfolioAsset = { currency: string; total: number; available: number; locked: number; usd_value: number | null };
+export type Portfolio = { mode: string; balance: number; asset: string; equity: number | null; assets: PortfolioAsset[] };
 export type BrokerStatus = { connected: boolean; mode: string | null; balance: number };
 export type Session = { user_id: string; email: string };
 export type Profile = { user_id: string; username: string | null; dob: string | null };
