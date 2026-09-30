@@ -23,7 +23,7 @@ export default function AppTabs() {
             <TabButton icon="home-variant-outline" selectedIcon="home-variant">Home</TabButton>
           </TabTrigger>
           <TabTrigger name="positions" href="/positions" asChild>
-            <TabButton icon="chart-box-outline" selectedIcon="chart-box">Positions</TabButton>
+            <TabButton icon="clipboard-list-outline" selectedIcon="clipboard-list">Orders</TabButton>
           </TabTrigger>
           <TabTrigger name="trade" href="/trade" asChild>
             <TabButton icon="swap-horizontal" selectedIcon="swap-horizontal" isTrade>Trade</TabButton>
