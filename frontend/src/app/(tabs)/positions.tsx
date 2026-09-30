@@ -5,6 +5,7 @@ import { AppText as Text } from '@/components/app-text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
+import { NetworkSwitch } from '@/components/network-switch';
 import { api, type OrderActivity, type OrderProduct, type OrderView } from '@/lib/api';
 
 const PRODUCTS: { id: OrderProduct; label: string }[] = [
@@ -140,9 +141,12 @@ export default function OrdersScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.title}>Orders</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Refresh orders" onPress={refresh} style={styles.refresh}>
-            <MaterialCommunityIcons name="refresh" size={20} color={AppColors.accentEnd} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <NetworkSwitch />
+            <Pressable accessibilityRole="button" accessibilityLabel="Refresh orders" onPress={refresh} style={styles.refresh}>
+              <MaterialCommunityIcons name="refresh" size={20} color={AppColors.accentEnd} />
+            </Pressable>
+          </View>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productTabs}>
@@ -264,6 +268,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   title: { color: '#FFFFFF', fontSize: 26, fontWeight: '700' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   refresh: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: AppColors.surface },
   productTabs: { gap: 7, paddingBottom: 12 },
   productTab: { minWidth: 76, height: 36, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderRadius: 7, backgroundColor: AppColors.surface },
