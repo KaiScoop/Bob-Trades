@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 3,
   },
-  tradeButton: { justifyContent: 'flex-end', paddingBottom: 2 },
+  tradeButton: { justifyContent: 'flex-end', paddingBottom: 12 },
   tradeIcon: {
     position: 'absolute',
     top: -21,
