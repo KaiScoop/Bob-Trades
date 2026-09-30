@@ -7,11 +7,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import { AppText as Text, AppTextInput as TextInput } from '@/components/app-text';
 import { AppColors } from '@/constants/theme';
 import { api, type BrokerStatus } from '@/lib/api';
 
