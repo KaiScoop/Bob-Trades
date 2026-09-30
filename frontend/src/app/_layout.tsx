@@ -1,16 +1,35 @@
 import { DarkTheme, router, Stack, ThemeProvider, usePathname, useSegments } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { GoogleSansFlex_400Regular } from '@expo-google-fonts/google-sans-flex/400Regular';
+import { GoogleSansFlex_500Medium } from '@expo-google-fonts/google-sans-flex/500Medium';
+import { GoogleSansFlex_600SemiBold } from '@expo-google-fonts/google-sans-flex/600SemiBold';
+import { GoogleSansFlex_700Bold } from '@expo-google-fonts/google-sans-flex/700Bold';
+import { InstrumentSans_400Regular } from '@expo-google-fonts/instrument-sans/400Regular';
+import { InstrumentSans_500Medium } from '@expo-google-fonts/instrument-sans/500Medium';
+import { InstrumentSans_600SemiBold } from '@expo-google-fonts/instrument-sans/600SemiBold';
+import { InstrumentSans_700Bold } from '@expo-google-fonts/instrument-sans/700Bold';
 import { api } from '@/lib/api';
 import { clearTokens, getAccessToken, getRefreshToken, storeMagicLinkFromUrl } from '@/lib/secure';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function TabLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    GoogleSansFlex_400Regular,
+    GoogleSansFlex_500Medium,
+    GoogleSansFlex_600SemiBold,
+    GoogleSansFlex_700Bold,
+    InstrumentSans_400Regular,
+    InstrumentSans_500Medium,
+    InstrumentSans_600SemiBold,
+    InstrumentSans_700Bold,
+  });
   const segments = useSegments();
   const routeName = segments[0] ?? '';
   const routerPathname = usePathname();
@@ -57,6 +76,8 @@ export default function TabLayout() {
       router.replace('/');
     }
   }, [hasSession, isPublicPath, pathname, routeName]);
+
+  if (!fontsLoaded && !fontError) return null;
 
   return (
     <ThemeProvider value={DarkTheme}>
