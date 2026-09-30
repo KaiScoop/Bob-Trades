@@ -390,7 +390,7 @@ function WatchlistRow({
           <Text numberOfLines={1} style={styles.watchlistPrice}>{formatPrice(price)}</Text>
           <Text style={[styles.watchlistChange, { color: changeColor }]}>{formattedChange}</Text>
         </View>
-        <Sparkline values={sparkline} color={change !== null && change < 0 ? AppColors.danger : AppColors.accentEnd} width={58} />
+        <Sparkline values={sparkline} color={changeColor} width={58} />
       </Pressable>
       <Pressable
         accessibilityRole="button"
