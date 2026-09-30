@@ -40,6 +40,11 @@ function dailyChange(prices: Record<string, MarketTicker>, symbol: string) {
   return Number.isFinite(value) ? value : null;
 }
 
+function trendColor(change: number | null) {
+  if (change === null) return AppColors.muted;
+  return change < 0 ? AppColors.danger : AppColors.success;
+}
+
 export default function HomeScreen() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
@@ -55,7 +60,6 @@ export default function HomeScreen() {
   const [connectOpen, setConnectOpen] = useState(false);
   const [connectMode, setConnectMode] = useState<NetworkMode>('testnet');
   const [showAllMarkets, setShowAllMarkets] = useState(false);
-  const [showMovers, setShowMovers] = useState(false);
   const [prices, setPrices] = useState<Record<string, MarketTicker>>({});
 
   useEffect(() => {
@@ -141,10 +145,11 @@ export default function HomeScreen() {
   if (!sessionReady) return <View style={styles.container} />;
 
   const watchlistSymbols = watchlist.filter((symbol) => symbols.includes(symbol));
-  const orderedSymbols = showMovers
-    ? [...symbols].sort((left, right) => Math.abs(dailyChange(prices, right) ?? 0) - Math.abs(dailyChange(prices, left) ?? 0))
-    : symbols;
-  const visibleSymbols = showAllMarkets ? orderedSymbols : orderedSymbols.slice(0, 4);
+  const topMovers = [...symbols]
+    .filter((symbol) => dailyChange(prices, symbol) !== null)
+    .sort((left, right) => Math.abs(dailyChange(prices, right) ?? 0) - Math.abs(dailyChange(prices, left) ?? 0))
+    .slice(0, 3);
+  const visibleSymbols = showAllMarkets ? symbols : symbols.slice(0, 4);
   const activeMode: NetworkMode = broker?.mode === 'mainnet' ? 'mainnet' : 'testnet';
 
   return (
@@ -178,6 +183,7 @@ export default function HomeScreen() {
                   price={prices[symbol]?.lastPrice}
                   change={dailyChange(prices, symbol)}
                   sparkline={sparklineData[symbol] ?? []}
+                  isSaved
                   onToggleSaved={() => toggleWatchlist(symbol)}
                   onOpen={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
                 />
@@ -189,15 +195,33 @@ export default function HomeScreen() {
           {watchlistError ? <Text style={styles.watchlistError}>{watchlistError}</Text> : null}
 
           <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Top Movers</Text>
+            <Text style={styles.muted}>24h change</Text>
+          </View>
+          {loading ? (
+            <ActivityIndicator color={AppColors.accentEnd} style={styles.loader} />
+          ) : topMovers.length ? (
+            <View style={styles.watchlist}>
+              {topMovers.map((symbol) => (
+                <WatchlistRow
+                  key={`mover-${symbol}`}
+                  symbol={symbol}
+                  price={prices[symbol]?.lastPrice}
+                  change={dailyChange(prices, symbol)}
+                  sparkline={sparklineData[symbol] ?? []}
+                  isSaved={watchlist.includes(symbol)}
+                  onToggleSaved={() => toggleWatchlist(symbol)}
+                  onOpen={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
+                />
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.emptyWatchlist}>Live movers will appear when price data is available.</Text>
+          )}
+
+          <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Markets</Text>
             <View style={styles.marketActions}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: showMovers }}
-                onPress={() => setShowMovers((current) => !current)}
-                style={[styles.moversButton, showMovers && styles.moversButtonActive]}>
-                <Text style={[styles.moversText, showMovers && styles.moversTextActive]}>Movers</Text>
-              </Pressable>
               {symbols.length > 4 ? (
                 <Pressable accessibilityRole="button" onPress={() => setShowAllMarkets((current) => !current)}>
                   <Text style={styles.seeAll}>{showAllMarkets ? 'Show less' : 'See all'}</Text>
@@ -284,9 +308,7 @@ function MarketCard({
   onToggleSaved: () => void;
   onOpen: () => void;
 }) {
-  const changeColor = change === null
-    ? AppColors.muted
-    : change < 0 ? AppColors.danger : AppColors.success;
+  const changeColor = trendColor(change);
   const formattedChange = change === null
     ? '--'
     : `${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)}%`;
@@ -319,7 +341,7 @@ function MarketCard({
           <Text numberOfLines={1} style={styles.marketPrice}>{formatPrice(price)}</Text>
           <View style={styles.marketCardChartRow}>
             <Text style={[styles.marketChange, { color: changeColor }]}>{formattedChange}</Text>
-            <Sparkline values={sparkline} color={change !== null && change < 0 ? AppColors.danger : AppColors.accentEnd} />
+            <Sparkline values={sparkline} color={changeColor} />
           </View>
         </View>
       </Pressable>
@@ -332,6 +354,7 @@ function WatchlistRow({
   price,
   change,
   sparkline,
+  isSaved,
   onToggleSaved,
   onOpen,
 }: {
@@ -339,12 +362,11 @@ function WatchlistRow({
   price?: string;
   change: number | null;
   sparkline: number[];
+  isSaved: boolean;
   onToggleSaved: () => void;
   onOpen: () => void;
 }) {
-  const changeColor = change === null
-    ? AppColors.muted
-    : change < 0 ? AppColors.danger : AppColors.success;
+  const changeColor = trendColor(change);
   const formattedChange = change === null
     ? '--'
     : `${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)}%`;
@@ -372,10 +394,10 @@ function WatchlistRow({
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${assetName(symbol)} from watchlist`}
+        accessibilityLabel={`${isSaved ? 'Remove' : 'Add'} ${assetName(symbol)} ${isSaved ? 'from' : 'to'} watchlist`}
         onPress={onToggleSaved}
         style={styles.watchButton}>
-        <MaterialCommunityIcons name="star" size={19} color={AppColors.accentEnd} />
+        <MaterialCommunityIcons name={isSaved ? 'star' : 'star-outline'} size={19} color={isSaved ? AppColors.accentEnd : AppColors.muted} />
       </Pressable>
     </View>
   );
@@ -447,10 +469,6 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, minHeight: 28 },
   sectionTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
   marketActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  moversButton: { minHeight: 28, justifyContent: 'center', paddingHorizontal: 9, borderRadius: 6, backgroundColor: AppColors.surface },
-  moversButtonActive: { backgroundColor: AppColors.accentEnd },
-  moversText: { color: AppColors.muted, fontSize: 11, fontWeight: '600' },
-  moversTextActive: { color: '#FFFFFF' },
   seeAll: { color: AppColors.accentEnd, fontSize: 12, fontWeight: '600' },
   muted: { color: AppColors.muted, fontSize: 13 },
   emptyWatchlist: { color: AppColors.muted, fontSize: 13, paddingVertical: 8 },
