@@ -525,27 +525,77 @@ def test_me_profile_round_trip(monkeypatch):
     def fake_request(method, url, **kwargs):
         requests.append((method, url, kwargs))
         if method == "GET":
-            return httpx.Response(200, json=[{"user_id": "user-789", "username": "bob", "dob": "1999-01-01"}])
+            return httpx.Response(200, json=[{
+                "user_id": "user-789",
+                "username": "bob",
+                "dob": "1999-01-01",
+                "avatar_url": "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+            }])
         if method == "POST":
-            return httpx.Response(200, json=[{"user_id": "user-789", "username": "bobby", "dob": "2000-02-02"}])
+            return httpx.Response(200, json=[{
+                "user_id": "user-789",
+                "username": "bobby",
+                "dob": "2000-02-02",
+                "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+            }])
         return httpx.Response(200, json=[])
 
     monkeypatch.setattr("app.main.httpx.request", fake_request)
 
     get_response = TestClient(app).get("/me", headers={"Authorization": "Bearer user-access-token"})
     assert get_response.status_code == 200
-    assert get_response.json() == {"user_id": "user-789", "username": "bob", "dob": "1999-01-01"}
+    assert get_response.json() == {
+        "user_id": "user-789",
+        "username": "bob",
+        "dob": "1999-01-01",
+        "avatar_url": "https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg",
+    }
 
     patch_response = TestClient(app).patch(
         "/me",
         headers={"Authorization": "Bearer user-access-token"},
-        json={"username": "bobby", "dob": "2000-02-02"},
+        json={"username": "bobby", "dob": "2000-02-02", "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg"},
     )
     assert patch_response.status_code == 200
-    assert patch_response.json() == {"user_id": "user-789", "username": "bobby", "dob": "2000-02-02"}
+    assert patch_response.json() == {
+        "user_id": "user-789",
+        "username": "bobby",
+        "dob": "2000-02-02",
+        "avatar_url": "https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg",
+    }
     assert requests[1][0] == "POST"
     assert requests[1][2]["headers"]["Prefer"] == "resolution=merge-duplicates,return=representation"
     assert requests[0][2]["headers"]["Authorization"] == "Bearer user-access-token"
+
+
+def test_me_assigns_random_default_avatar_when_missing(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co/")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "must-not-be-used")
+    monkeypatch.setattr(
+        auth.httpx,
+        "AsyncClient",
+        lambda **_kwargs: StubAuthClient(httpx.Response(200, json={"id": "user-random-avatar", "email": "avatar@example.com"})),
+    )
+
+    requests = []
+
+    def fake_request(method, url, **kwargs):
+        requests.append((method, url, kwargs))
+        if method == "GET":
+            return httpx.Response(200, json=[{"user_id": "user-random-avatar", "username": "bob", "dob": "1999-01-01"}])
+        if method == "POST":
+            payload = kwargs["json"]
+            return httpx.Response(200, json=[{"user_id": "user-random-avatar", "username": payload["username"], "dob": payload["dob"], "avatar_url": payload["avatar_url"]}])
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr("app.main.httpx.request", fake_request)
+
+    response = TestClient(app).get("/me", headers={"Authorization": "Bearer user-access-token"})
+
+    assert response.status_code == 200
+    assert response.json()["avatar_url"] in main.DEFAULT_AVATAR_URLS
+    assert any(request[0] == "POST" for request in requests)
 
 
 def test_profile_endpoints_fail_cleanly_when_supabase_is_not_configured(monkeypatch):
