@@ -7,6 +7,15 @@ const API_URL = Platform.OS === 'web'
 
 export type PortfolioAsset = { currency: string; total: number; available: number; locked: number; usd_value: number | null };
 export type Portfolio = { mode: string; balance: number; asset: string; equity: number | null; assets: PortfolioAsset[] };
+export type OrderProduct = 'stocks' | 'spot' | 'futures' | 'options';
+export type OrderView = 'open' | 'history' | 'trades';
+export type OrderActivity = {
+  supported: boolean;
+  message: string | null;
+  records: Record<string, unknown>[];
+  count: number;
+  next_cursor: string | null;
+};
 export type BrokerStatus = { connected: boolean; mode: string | null; balance: number };
 export type Session = { user_id: string; email: string };
 export type Profile = { user_id: string; username: string | null; dob: string | null };
@@ -118,6 +127,8 @@ export const api = {
   disconnectBybit: () => request<{ deleted: boolean }>('/broker/bybit', { method: 'DELETE' }),
   getPositions: () => request<{ positions: Position[]; count: number }>('/positions'),
   getOrders: () => request<{ orders: Record<string, unknown>[]; count: number }>('/orders'),
+  getOrderActivity: (product: OrderProduct, view: OrderView, cursor?: string) =>
+    request<OrderActivity>(`/orders/${product}/${view}?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
   closePosition: (symbol: string) => request(`/positions/${symbol}/close`, { method: 'POST' }),
   updateTpsl: (symbol: string, tp: number, sl: number) => request(`/positions/${symbol}/tpsl`, { method: 'POST', body: JSON.stringify({ tp, sl }) }),
   getLogs: (limit = 50) => request<{ logs: AgentLog[] }>(`/agent/logs?limit=${limit}`),
