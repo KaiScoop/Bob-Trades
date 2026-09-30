@@ -218,17 +218,17 @@ The response contains Supabase's token response, including the new
 ### `GET /me`
 
 ```json
-{"user_id":"auth-user-id","username":"bob","dob":"1990-01-01"}
+{"user_id":"auth-user-id","username":"bob","dob":"1990-01-01","avatar_url":"https://i.pinimg.com/1200x/37/6d/8f/376d8f204dfadac0940b289c24e7ac0e.jpg"}
 ```
 
-A new profile returns `username: null` and `dob: null`.
+A new profile returns `username: null`, `dob: null`, and a randomly assigned `avatar_url`.
 
 ### `PATCH /me`
 
 Request fields are optional; send only fields being changed:
 
 ```json
-{"username":"bob","dob":"1990-01-01"}
+{"username":"bob","dob":"1990-01-01","avatar_url":"https://i.pinimg.com/736x/0a/85/64/0a85642c09f1af906069b759e07d1b96.jpg"}
 ```
 
 Response is the stored profile in the same shape as `GET /me`.
