@@ -5,6 +5,7 @@ import { AppText as Text } from '@/components/app-text';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppColors } from '@/constants/theme';
+import { NetworkSwitch } from '@/components/network-switch';
 import { MarketChart } from '@/components/market-chart';
 import { api } from '@/lib/api';
 import { useLiveMarketChart } from '@/hooks/use-live-market-chart';
@@ -49,10 +50,11 @@ export default function MarketDetailScreen() {
           <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={() => router.back()} style={styles.backButton}>
             <Text style={styles.backArrow}>‹</Text>
           </Pressable>
-          <View>
+          <View style={styles.marketHeading}>
             <Text style={styles.eyebrow}>SPOT MARKET</Text>
             <Text style={styles.title}>{symbol.replace('USDT', '')}<Text style={styles.quote}> / USDT</Text></Text>
           </View>
+          <NetworkSwitch />
         </View>
 
         <View style={styles.quoteSection}>
@@ -91,6 +93,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: AppColors.background },
   content: { paddingHorizontal: 20, paddingBottom: 48 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 12, paddingBottom: 26 },
+  marketHeading: { flex: 1, minWidth: 0 },
   backButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: AppColors.surface, borderWidth: 1, borderColor: AppColors.hairline },
   backArrow: { color: '#fff', fontSize: 30, lineHeight: 32, marginTop: -3 },
   eyebrow: { color: AppColors.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1.4 },
