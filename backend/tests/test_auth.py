@@ -320,7 +320,23 @@ def test_broker_connect_and_portfolio(monkeypatch):
             self.mode = mode
 
         def fetch_balance(self):
-            return {"info": {"totalWalletBalance": "1234.56"}, "USDT": {"free": 1234.56}}
+            return {
+                "info": {
+                    "result": {
+                        "list": [{
+                            "totalWalletBalance": "1299.00",
+                            "totalEquity": "1300.00",
+                            "coin": [
+                                {"coin": "USDT", "usdValue": "1244.56"},
+                                {"coin": "BTC", "usdValue": "55.44"},
+                            ],
+                        }],
+                    },
+                },
+                "USDT": {"free": 1234.56, "used": 10.0, "total": 1244.56},
+                "BTC": {"free": 0.001, "total": 0.0015},
+                "DOGE": {"free": 0.0, "used": 0.0, "total": 0.0},
+            }
 
     created_clients = []
 
@@ -352,6 +368,11 @@ def test_broker_connect_and_portfolio(monkeypatch):
     assert portfolio_response.status_code == 200
     assert portfolio_response.json()["balance"] == 1234.56
     assert portfolio_response.json()["mode"] == "testnet"
+    assert portfolio_response.json()["equity"] == 1300.0
+    assert portfolio_response.json()["assets"] == [
+        {"currency": "USDT", "total": 1244.56, "available": 1234.56, "locked": 10.0, "usd_value": 1244.56},
+        {"currency": "BTC", "total": 0.0015, "available": 0.001, "locked": 0.0005, "usd_value": 55.44},
+    ]
     assert created_clients[-1].api_key == "demo-key"
     assert created_clients[-1].api_secret == "demo-secret"
 
