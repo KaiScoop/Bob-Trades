@@ -334,6 +334,15 @@ def get_market_indicators(
     }
 
 
+@app.get("/markets/{symbol}/book")
+def get_market_book(symbol: str) -> dict[str, object]:
+    normalized = _ensure_symbol(symbol)
+    return {
+        "symbol": normalized,
+        "book": _market_cache(f"mkt:{normalized}:book"),
+    }
+
+
 @app.get("/stream")
 def market_stream(
     request: Request,
