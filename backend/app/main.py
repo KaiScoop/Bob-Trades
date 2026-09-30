@@ -451,6 +451,64 @@ def _cached_usdt_free(snapshot: dict[str, Any]) -> float:
     return float((snapshot.get("balance", {}).get("USDT") or {}).get("free") or 0.0)
 
 
+def _portfolio_details(mode: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    balance = snapshot.get("balance")
+    if not isinstance(balance, dict):
+        balance = {}
+
+    info = balance.get("info")
+    if not isinstance(info, dict):
+        info = {}
+    result = info.get("result")
+    account_list = result.get("list") if isinstance(result, dict) else None
+    account_summary = account_list[0] if isinstance(account_list, list) and account_list else {}
+    if not isinstance(account_summary, dict):
+        account_summary = {}
+
+    equity_value = info.get("totalEquity") or info.get("totalWalletBalance")
+    if equity_value is None:
+        equity_value = account_summary.get("totalEquity") or account_summary.get("totalWalletBalance")
+
+    usd_values: dict[str, float] = {}
+    coin_details = account_summary.get("coin")
+    if isinstance(coin_details, list):
+        for coin in coin_details:
+            if not isinstance(coin, dict) or coin.get("usdValue") is None:
+                continue
+            currency = coin.get("coin")
+            if isinstance(currency, str):
+                usd_values[currency] = float(coin["usdValue"])
+
+    metadata_keys = {"free", "used", "total", "info", "timestamp", "datetime"}
+    assets: list[dict[str, float | str | None]] = []
+    for currency, amounts in balance.items():
+        if currency in metadata_keys or not isinstance(amounts, dict):
+            continue
+        available = float(amounts.get("free") or 0.0)
+        used_value = amounts.get("used")
+        total_value = amounts.get("total")
+        total = float(total_value) if total_value is not None else available + float(used_value or 0.0)
+        locked = float(used_value) if used_value is not None else max(total - available, 0.0)
+        if total <= 0:
+            continue
+        assets.append({
+            "currency": currency,
+            "total": total,
+            "available": available,
+            "locked": locked,
+            "usd_value": usd_values.get(currency),
+        })
+    assets.sort(key=lambda item: (item["currency"] != "USDT", str(item["currency"])))
+
+    return {
+        "mode": mode,
+        "balance": _cached_usdt_free({"balance": balance}),
+        "asset": "USDT",
+        "equity": float(equity_value) if equity_value is not None else None,
+        "assets": assets,
+    }
+
+
 def _refresh_portfolio(user: AuthenticatedUser, mode: str, broker: BybitSpotExecution, symbol: str) -> None:
     balance = broker.fetch_balance()
     holdings = broker.fetch_holdings(symbol)
@@ -568,11 +626,7 @@ def portfolio(
 
     cached = _portfolio_cache(user.id, connection["mode"])
     if cached is not None:
-        return {
-            "mode": connection["mode"],
-            "balance": _cached_usdt_free(cached),
-            "asset": "USDT",
-        }
+        return _portfolio_details(connection["mode"], cached)
 
     client = create_bybit_client(
         connection["mode"],
@@ -584,11 +638,7 @@ def portfolio(
     except (httpx.HTTPError, RuntimeError) as error:
         raise HTTPException(status_code=502, detail="Bybit balance request failed") from error
     _cache_portfolio(user.id, connection["mode"], balance)
-    return {
-        "mode": connection["mode"],
-        "balance": float(balance.get("USDT", {}).get("free", 0.0) or 0.0),
-        "asset": "USDT",
-    }
+    return _portfolio_details(connection["mode"], {"balance": balance})
 
 
 @app.get("/positions")
