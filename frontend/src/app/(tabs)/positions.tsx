@@ -1,137 +1,257 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppText as Text } from '@/components/app-text';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AppColors } from '@/constants/theme';
-import { api, type Position } from '@/lib/api';
 
-function getLoadErrorMessage(error: unknown) {
-  const isMissingBroker = error instanceof Error
-    && error.message.includes('API 404')
-    && (error.message.includes('/positions') || error.message.includes('/orders'));
-  return isMissingBroker
-    ? 'Connect your Bybit account to view positions and orders.'
-    : 'Could not load positions and orders. Try again.';
+import { AppColors } from '@/constants/theme';
+import { api, type OrderActivity, type OrderProduct, type OrderView } from '@/lib/api';
+
+const PRODUCTS: { id: OrderProduct; label: string }[] = [
+  { id: 'stocks', label: 'Stocks' },
+  { id: 'spot', label: 'Spot' },
+  { id: 'futures', label: 'Futures' },
+  { id: 'options', label: 'Options' },
+];
+
+const VIEWS: { id: OrderView; label: string }[] = [
+  { id: 'open', label: 'Open Orders' },
+  { id: 'history', label: 'Order History' },
+  { id: 'trades', label: 'Trade History' },
+];
+
+const ORDER_COLUMNS = [
+  { key: 'symbol', label: 'Symbol', width: 118 },
+  { key: 'side', label: 'Side', width: 76 },
+  { key: 'orderType', label: 'Type', width: 94 },
+  { key: 'qty', label: 'Quantity', width: 100 },
+  { key: 'price', label: 'Price', width: 100 },
+  { key: 'cumExecQty', label: 'Filled', width: 100 },
+  { key: 'avgPrice', label: 'Avg. Price', width: 110 },
+  { key: 'orderStatus', label: 'Status', width: 110 },
+  { key: 'createdTime', label: 'Created', width: 170 },
+];
+
+const TRADE_COLUMNS = [
+  { key: 'symbol', label: 'Symbol', width: 118 },
+  { key: 'side', label: 'Side', width: 76 },
+  { key: 'execType', label: 'Type', width: 94 },
+  { key: 'execQty', label: 'Quantity', width: 100 },
+  { key: 'execPrice', label: 'Price', width: 100 },
+  { key: 'execValue', label: 'Value', width: 110 },
+  { key: 'execFee', label: 'Fee', width: 100 },
+  { key: 'execTime', label: 'Executed', width: 170 },
+];
+
+type OrderColumn = typeof ORDER_COLUMNS[number];
+
+function getRecordKey(record: Record<string, unknown>, index: number) {
+  return String(record.orderId ?? record.execId ?? record.orderLinkId ?? `${record.symbol ?? 'row'}-${index}`);
 }
 
-export default function PositionsScreen() {
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [orders, setOrders] = useState<Record<string, unknown>[]>([]);
-  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
-  const [tab, setTab] = useState<'active' | 'history'>('active');
-  const [busy, setBusy] = useState(true);
-  const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
-  const [closeError, setCloseError] = useState('');
-  const [error, setError] = useState('');
-  const load = () => {
-    setBusy(true);
-    setError('');
-    Promise.all([api.getPositions(), api.getOrders()])
-      .then(([positionsResponse, ordersResponse]) => {
-      setPositions(positionsResponse.positions);
-      setOrders(ordersResponse.orders);
-      })
-      .catch((requestError: unknown) => setError(getLoadErrorMessage(requestError)))
-      .finally(() => setBusy(false));
-  };
-  const closePosition = async (position: Position) => {
-    setSelectedPosition(position);
-    setClosingSymbol(position.symbol);
-    setCloseError('');
-    try {
-      await api.closePosition(position.symbol);
-      setSelectedPosition(null);
-      load();
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : 'Could not close this position.';
-      setCloseError(message.replace(/^API \d+ POST \/positions\/[^:]+:\s*/, '') || 'Could not close this position.');
-    } finally {
-      setClosingSymbol(null);
-    }
-  };
+function formatValue(key: string, value: unknown) {
+  if (value === null || value === undefined || value === '') return '--';
+  if (typeof value === 'object') return JSON.stringify(value);
+  const stringValue = String(value);
+  if (/(Time|time)$/.test(key) && /^\d{13}$/.test(stringValue)) {
+    const timestamp = Number(stringValue);
+    if (Number.isFinite(timestamp)) return new Date(timestamp).toLocaleString();
+  }
+  return stringValue;
+}
 
-  const extraDetails = selectedPosition
-    ? Object.entries(selectedPosition).filter(([key, value]) => !['symbol', 'side', 'size'].includes(key) && value !== null && value !== undefined)
-    : [];
+function recordColumns(view: OrderView): OrderColumn[] {
+  return view === 'trades' ? TRADE_COLUMNS : ORDER_COLUMNS;
+}
+
+export default function OrdersScreen() {
+  const [product, setProduct] = useState<OrderProduct>('spot');
+  const [view, setView] = useState<OrderView>('open');
+  const [activity, setActivity] = useState<OrderActivity | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.getPositions(), api.getOrders()])
-      .then(([positionsResponse, ordersResponse]) => {
+    api.getOrderActivity(product, view)
+      .then((result) => {
         if (!active) return;
-        setPositions(positionsResponse.positions);
-        setOrders(ordersResponse.orders);
+        setActivity(result);
+        setError('');
       })
       .catch((requestError: unknown) => {
-        if (active) setError(getLoadErrorMessage(requestError));
+        if (!active) return;
+        setActivity(null);
+        const message = requestError instanceof Error ? requestError.message : '';
+        setError(message.includes('API 404')
+          ? 'Connect your Bybit account in Profile to view order activity.'
+          : 'Could not load order activity. Try again.');
       })
-      .finally(() => {
-        if (active) setBusy(false);
-      });
+      .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [product, refreshKey, view]);
+
+  const selectProduct = (nextProduct: OrderProduct) => {
+    if (nextProduct === product) return;
+    setProduct(nextProduct);
+    setActivity(null);
+    setError('');
+    setLoading(true);
+  };
+
+  const selectView = (nextView: OrderView) => {
+    if (nextView === view) return;
+    setView(nextView);
+    setActivity(null);
+    setError('');
+    setLoading(true);
+  };
+
+  const refresh = () => {
+    setLoading(true);
+    setError('');
+    setRefreshKey((key) => key + 1);
+  };
+
+  const loadMore = async () => {
+    if (!activity?.next_cursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = await api.getOrderActivity(product, view, activity.next_cursor);
+      setActivity((current) => current ? {
+        ...nextPage,
+        records: [...current.records, ...nextPage.records],
+        count: current.count + nextPage.count,
+      } : nextPage);
+    } catch {
+      setError('Could not load the next page. Try again.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const columns = recordColumns(view);
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Positions</Text>
-      <View style={styles.tabs}>
-        <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.selected]}><Text style={styles.tabText}>Active</Text></Pressable>
-        <Pressable onPress={() => setTab('history')} style={[styles.tab, tab === 'history' && styles.selected]}><Text style={styles.tabText}>History</Text></Pressable>
-      </View>
-      {busy ? <ActivityIndicator color={AppColors.accentEnd} /> : error ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>Connect Bybit</Text>
-          <Text style={styles.muted}>{error}</Text>
-          <Pressable onPress={load}><Text style={styles.retry}>Retry</Text></Pressable>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Orders</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Refresh orders" onPress={refresh} style={styles.refresh}>
+            <MaterialCommunityIcons name="refresh" size={20} color={AppColors.accentEnd} />
+          </Pressable>
         </View>
-      ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {tab === 'active' ? positions.length ? positions.map((position) => (
-            <View key={position.symbol} style={styles.row}>
-              <Pressable accessibilityRole="button" accessibilityLabel={`View ${position.symbol} position details`} onPress={() => { setSelectedPosition(position); setCloseError(''); }} style={styles.positionSummary}>
-                <Text style={styles.symbol}>{position.symbol}</Text>
-                <Text style={styles.muted}>{position.side} · {position.size}</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" disabled={closingSymbol === position.symbol} onPress={() => closePosition(position)} style={styles.close}>
-                <Text style={styles.closeText}>{closingSymbol === position.symbol ? 'Closing…' : 'Close'}</Text>
-              </Pressable>
-            </View>
-          )) : (
-            <View style={styles.empty}><Text style={styles.emptyTitle}>No open positions.</Text><Text style={styles.muted}>Bob hasn’t opened anything yet.</Text></View>
-          ) : orders.length ? orders.map((order, index) => (
-            <View key={String(order.orderId ?? order.id ?? index)} style={styles.row}>
-              <Text style={styles.symbol}>{String(order.symbol ?? 'Order')}</Text>
-              <Text style={styles.muted}>{String(order.status ?? order.orderStatus ?? 'Recent')}</Text>
-            </View>
-          )) : (
-            <View style={styles.empty}><Text style={styles.emptyTitle}>No recent orders.</Text></View>
-          )}
-        </ScrollView>
-      )}
 
-      <Modal transparent animationType="slide" visible={selectedPosition !== null} onRequestClose={() => setSelectedPosition(null)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modal}>
-            <View style={styles.modalHeader}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productTabs}>
+          {PRODUCTS.map((item) => (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: product === item.id }}
+              onPress={() => selectProduct(item.id)}
+              style={[styles.productTab, product === item.id && styles.productTabSelected]}>
+              <Text style={[styles.productText, product === item.id && styles.productTextSelected]}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        <View style={styles.viewTabs}>
+          {VIEWS.map((item) => (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: view === item.id }}
+              onPress={() => selectView(item.id)}
+              style={[styles.viewTab, view === item.id && styles.viewTabSelected]}>
+              <Text numberOfLines={1} style={[styles.viewText, view === item.id && styles.viewTextSelected]}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.tableHeading}>
+          <Text style={styles.resultCount}>{activity?.supported ? `${activity.count} records` : 'Bybit activity'}</Text>
+          <Text style={styles.exchangeLabel}>BYBIT</Text>
+        </View>
+
+        {loading ? (
+          <ActivityIndicator color={AppColors.accentEnd} style={styles.loading} />
+        ) : error ? (
+          <View style={styles.state}>
+            <Text style={styles.stateTitle}>Activity unavailable</Text>
+            <Text style={styles.stateMessage}>{error}</Text>
+            <Pressable onPress={refresh} style={styles.stateButton}><Text style={styles.stateButtonText}>Retry</Text></Pressable>
+          </View>
+        ) : activity && !activity.supported ? (
+          <View style={styles.state}>
+            <MaterialCommunityIcons name="information-outline" size={24} color={AppColors.accentEnd} />
+            <Text style={styles.stateTitle}>Stocks unavailable</Text>
+            <Text style={styles.stateMessage}>{activity.message}</Text>
+          </View>
+        ) : activity?.records.length ? (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tableScroller}>
               <View>
-                <Text style={styles.modalEyebrow}>POSITION DETAILS</Text>
-                <Text style={styles.modalTitle}>{selectedPosition?.symbol}</Text>
+                <View style={styles.tableHeader}>
+                  {columns.map((column) => <Text key={column.key} style={[styles.columnHeader, { width: column.width }]}>{column.label}</Text>)}
+                  <Text style={[styles.columnHeader, styles.detailsHeader]}>Details</Text>
+                </View>
+                {activity.records.map((record, index) => (
+                  <Pressable
+                    key={getRecordKey(record, index)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View all fields for ${String(record.symbol ?? 'order')}`}
+                    onPress={() => setSelectedRecord(record)}
+                    style={({ pressed }) => [styles.tableRow, pressed && styles.rowPressed]}>
+                    {columns.map((column) => (
+                      <Text key={column.key} numberOfLines={1} style={[styles.cell, { width: column.width }]}>
+                        {formatValue(column.key, record[column.key])}
+                      </Text>
+                    ))}
+                    <View style={styles.detailsCell}>
+                      <MaterialCommunityIcons name="open-in-new" size={15} color={AppColors.accentEnd} />
+                    </View>
+                  </Pressable>
+                ))}
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Close position details" onPress={() => setSelectedPosition(null)} style={styles.dismiss}>
-                <Text style={styles.dismissText}>×</Text>
+            </ScrollView>
+            {activity.next_cursor ? (
+              <Pressable accessibilityRole="button" disabled={loadingMore} onPress={loadMore} style={styles.loadMore}>
+                {loadingMore ? <ActivityIndicator color={AppColors.accentEnd} /> : <Text style={styles.loadMoreText}>Load more</Text>}
+              </Pressable>
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.state}>
+            <MaterialCommunityIcons name="text-box-search-outline" size={26} color={AppColors.muted} />
+            <Text style={styles.stateTitle}>No records</Text>
+            <Text style={styles.stateMessage}>There are no {VIEWS.find((item) => item.id === view)?.label.toLowerCase()} for this product.</Text>
+          </View>
+        )}
+      </ScrollView>
+
+      <Modal transparent animationType="slide" visible={selectedRecord !== null} onRequestClose={() => setSelectedRecord(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.detailSheet}>
+            <View style={styles.detailHeader}>
+              <View style={styles.detailHeading}>
+                <Text style={styles.detailEyebrow}>BYBIT RESPONSE</Text>
+                <Text numberOfLines={1} style={styles.detailTitle}>{String(selectedRecord?.symbol ?? selectedRecord?.orderId ?? 'Record details')}</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close record details" onPress={() => setSelectedRecord(null)} style={styles.dismiss}>
+                <MaterialCommunityIcons name="close" size={20} color="#FFFFFF" />
               </Pressable>
             </View>
             <ScrollView style={styles.detailList}>
-              <DetailRow label="Direction" value={selectedPosition?.side} />
-              <DetailRow label="Size" value={selectedPosition?.size} />
-              {extraDetails.map(([key, value]) => <DetailRow key={key} label={formatLabel(key)} value={value} />)}
+              {Object.entries(selectedRecord ?? {}).map(([key, value]) => (
+                <View key={key} style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>{key}</Text>
+                  <Text selectable style={styles.detailValue}>{formatValue(key, value)}</Text>
+                </View>
+              ))}
             </ScrollView>
-            {closeError ? <Text accessibilityRole="alert" style={styles.closeError}>{closeError}</Text> : null}
-            {selectedPosition ? (
-              <Pressable accessibilityRole="button" disabled={closingSymbol === selectedPosition.symbol} onPress={() => closePosition(selectedPosition)} style={[styles.closeAction, closingSymbol === selectedPosition.symbol && styles.disabled]}>
-                <Text style={styles.closeActionText}>{closingSymbol === selectedPosition.symbol ? 'Closing position…' : 'Close Position'}</Text>
-              </Pressable>
-            ) : null}
           </View>
         </View>
       </Modal>
@@ -139,49 +259,50 @@ export default function PositionsScreen() {
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: unknown }) {
-  if (value === null || value === undefined) return null;
-  const displayValue = typeof value === 'number'
-    ? value.toLocaleString(undefined, { maximumFractionDigits: 8 })
-    : typeof value === 'string' || typeof value === 'boolean'
-      ? String(value)
-      : JSON.stringify(value);
-  return <View style={styles.detailRow}><Text style={styles.detailLabel}>{label}</Text><Text selectable style={styles.detailValue}>{displayValue}</Text></View>;
-}
-
-function formatLabel(value: string) {
-  return value.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/^./, (letter) => letter.toUpperCase());
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: AppColors.background, padding: 20 },
-  title: { color: '#fff', fontSize: 32, fontWeight: '700', marginTop: 16 },
-  tabs: { flexDirection: 'row', backgroundColor: AppColors.surface, borderRadius: 8, padding: 4, marginVertical: 24 },
-  tab: { flex: 1, alignItems: 'center', padding: 11, borderRadius: 6 },
-  selected: { backgroundColor: AppColors.raised },
-  tabText: { color: '#fff', fontWeight: '600' },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomColor: AppColors.hairline, borderBottomWidth: 1 },
-  positionSummary: { flex: 1, paddingVertical: 2 },
-  symbol: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  muted: { color: AppColors.muted, fontSize: 13, marginTop: 5 },
-  close: { borderColor: AppColors.danger, borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 7 },
-  closeText: { color: AppColors.danger, fontWeight: '700' },
-  empty: { alignItems: 'center', marginTop: 120 },
-  emptyTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  retry: { color: '#8EA8FF', fontWeight: '700', marginTop: 16 },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.72)' },
-  modal: { maxHeight: '82%', backgroundColor: AppColors.surface, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderColor: AppColors.hairline, borderWidth: 1, padding: 20, paddingBottom: 28 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 16, borderBottomWidth: 1, borderColor: AppColors.hairline },
-  modalEyebrow: { color: AppColors.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
-  modalTitle: { color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 5 },
-  dismiss: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: AppColors.raised },
-  dismissText: { color: '#fff', fontSize: 26, lineHeight: 28 },
-  detailList: { flexGrow: 0, marginTop: 6 },
-  detailRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingVertical: 14, borderBottomWidth: 1, borderColor: AppColors.hairline },
-  detailLabel: { color: AppColors.muted, fontSize: 13, flex: 1 },
-  detailValue: { color: '#fff', fontSize: 13, fontWeight: '600', textAlign: 'right', flex: 1 },
-  closeError: { color: AppColors.danger, fontSize: 13, marginTop: 14 },
-  closeAction: { alignItems: 'center', justifyContent: 'center', minHeight: 48, marginTop: 16, backgroundColor: AppColors.danger, borderRadius: 10 },
-  closeActionText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  disabled: { opacity: 0.55 },
+  container: { flex: 1, backgroundColor: AppColors.background },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  title: { color: '#FFFFFF', fontSize: 26, fontWeight: '700' },
+  refresh: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 8, backgroundColor: AppColors.surface },
+  productTabs: { gap: 7, paddingBottom: 12 },
+  productTab: { minWidth: 76, height: 36, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderRadius: 7, backgroundColor: AppColors.surface },
+  productTabSelected: { backgroundColor: AppColors.accentEnd },
+  productText: { color: AppColors.muted, fontSize: 12, fontWeight: '600' },
+  productTextSelected: { color: '#FFFFFF' },
+  viewTabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: AppColors.hairline },
+  viewTab: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', minHeight: 42, paddingHorizontal: 3, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  viewTabSelected: { borderBottomColor: AppColors.accentEnd },
+  viewText: { color: AppColors.muted, fontSize: 10, fontWeight: '500' },
+  viewTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  tableHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 13 },
+  resultCount: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  exchangeLabel: { color: AppColors.faint, fontSize: 9, fontWeight: '700' },
+  loading: { marginTop: 52 },
+  tableScroller: { flexGrow: 0, borderWidth: 1, borderColor: AppColors.hairline, borderRadius: 8 },
+  tableHeader: { flexDirection: 'row', alignItems: 'center', minHeight: 38, backgroundColor: AppColors.surface, borderBottomWidth: 1, borderBottomColor: AppColors.hairline },
+  columnHeader: { paddingHorizontal: 10, color: AppColors.muted, fontSize: 10, fontWeight: '600' },
+  detailsHeader: { width: 70 },
+  tableRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AppColors.hairline },
+  rowPressed: { backgroundColor: AppColors.raised },
+  cell: { paddingHorizontal: 10, color: '#FFFFFF', fontSize: 11, fontVariant: ['tabular-nums'] },
+  detailsCell: { width: 70, alignItems: 'center', justifyContent: 'center' },
+  loadMore: { minHeight: 42, alignItems: 'center', justifyContent: 'center', marginTop: 10, borderRadius: 7, backgroundColor: AppColors.surface },
+  loadMoreText: { color: AppColors.accentEnd, fontSize: 12, fontWeight: '600' },
+  state: { minHeight: 180, alignItems: 'center', justifyContent: 'center', padding: 22, borderRadius: 8, backgroundColor: AppColors.surface, gap: 8 },
+  stateTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '600', textAlign: 'center' },
+  stateMessage: { color: AppColors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  stateButton: { minHeight: 34, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 14, marginTop: 4, borderRadius: 6, backgroundColor: AppColors.accentEnd },
+  stateButtonText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.68)' },
+  detailSheet: { maxHeight: '84%', paddingHorizontal: 18, paddingTop: 18, paddingBottom: 28, backgroundColor: AppColors.surface, borderTopLeftRadius: 12, borderTopRightRadius: 12, borderWidth: 1, borderColor: AppColors.hairline },
+  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: AppColors.hairline },
+  detailHeading: { flex: 1, minWidth: 0 },
+  detailEyebrow: { color: AppColors.accentEnd, fontSize: 9, fontWeight: '700' },
+  detailTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '600', marginTop: 4 },
+  dismiss: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: AppColors.raised },
+  detailList: { marginTop: 4 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: AppColors.hairline },
+  detailLabel: { flex: 1, color: AppColors.muted, fontSize: 11 },
+  detailValue: { flex: 1.5, color: '#FFFFFF', fontSize: 11, textAlign: 'right' },
 });
