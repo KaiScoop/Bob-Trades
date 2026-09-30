@@ -209,14 +209,14 @@ export default function HomeScreen() {
             <Text style={styles.muted}>Markets are warming up. Pull to try again.</Text>
           ) : (
             <View style={styles.marketGrid}>
-              {visibleSymbols.map((symbol) => (
+              {visibleSymbols.map((symbol, index) => (
                 <MarketCard
                   key={`market-${symbol}`}
                   symbol={symbol}
                   price={prices[symbol]?.lastPrice}
                   change={dailyChange(prices, symbol)}
                   sparkline={sparklineData[symbol] ?? []}
-                    fullWidth={visibleSymbols.length === 1}
+                  fullWidth={index === visibleSymbols.length - 1 && visibleSymbols.length % 2 === 1}
                   isSaved={watchlist.includes(symbol)}
                   onToggleSaved={() => toggleWatchlist(symbol)}
                   onOpen={() => router.push({ pathname: '/market/[symbol]', params: { symbol } })}
@@ -397,15 +397,16 @@ function Sparkline({ values, color, width = SPARKLINE_WIDTH }: { values: number[
         const start = points[index];
         const dx = end.x - start.x;
         const dy = end.y - start.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
         return (
           <View
             key={index}
             style={[
               styles.sparklineSegment,
               {
-                left: start.x,
-                top: start.y - 1,
-                width: Math.sqrt(dx * dx + dy * dy),
+                left: (start.x + end.x - length - 1) / 2,
+                top: (start.y + end.y) / 2 - 1,
+                width: length + 1,
                 backgroundColor: color,
                 transform: [{ rotate: `${Math.atan2(dy, dx)}rad` }],
               },
