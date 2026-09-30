@@ -272,8 +272,22 @@ portfolio.
 ### `GET /portfolio`
 
 ```json
-{"mode":"testnet","balance":100.0,"asset":"USDT"}
+{
+  "mode": "testnet",
+  "balance": 100.0,
+  "asset": "USDT",
+  "equity": 165.0,
+  "assets": [
+    {"currency": "USDT", "total": 100.0, "available": 100.0, "locked": 0.0, "usd_value": 100.0},
+    {"currency": "BTC", "total": 0.001, "available": 0.001, "locked": 0.0, "usd_value": 65.0}
+  ]
+}
 ```
+
+`balance` is available USDT. `equity` is the account equity reported by Bybit,
+or `null` when the exchange does not include it. `assets` contains nonzero
+balances with available and locked quantities. `usd_value` is Bybit's reported
+USD value for the asset, or `null` when unavailable.
 
 ### `GET /positions`
 
