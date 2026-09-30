@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { AppColors } from '@/constants/theme';
 import { ConnectBybitModal } from '@/components/connect-bybit-modal';
+import { NetworkSwitch } from '@/components/network-switch';
 import { api, type BrokerStatus, type Portfolio, type Profile as ProfileData, type Session } from '@/lib/api';
 import { clearTokens } from '@/lib/secure';
 
@@ -73,7 +74,10 @@ export default function ProfileScreen() {
 	return (
 		<SafeAreaView style={styles.container}>
 			<ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-				<Text style={styles.title}>Profile</Text>
+				<View style={styles.pageHeader}>
+					<Text style={styles.title}>Profile</Text>
+					<NetworkSwitch />
+				</View>
 				<View style={styles.identity}>
 					<View style={styles.avatar}>
 						<Text style={styles.avatarText}>{(profile?.username ?? session?.email ?? 'B').slice(0, 1).toUpperCase()}</Text>
@@ -190,7 +194,8 @@ const styles = StyleSheet.create({
 	loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: AppColors.background },
 	container: { flex: 1, backgroundColor: AppColors.background },
 	content: { padding: 20, paddingBottom: 48 },
-	title: { color: '#FFFFFF', fontSize: 28, fontWeight: '700', marginTop: 12, marginBottom: 20 },
+	pageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, marginBottom: 20 },
+	title: { color: '#FFFFFF', fontSize: 28, fontWeight: '700' },
 	identity: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingBottom: 24 },
 	avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: AppColors.accentEnd, alignItems: 'center', justifyContent: 'center' },
 	avatarText: { color: '#FFFFFF', fontSize: 22, fontWeight: '700' },
