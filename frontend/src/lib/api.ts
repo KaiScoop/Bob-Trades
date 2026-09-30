@@ -21,8 +21,37 @@ export type Session = { user_id: string; email: string };
 export type Profile = { user_id: string; username: string | null; dob: string | null; avatar_url: string | null };
 export type Position = { symbol: string; side: string; size: number; free?: number; locked?: number; usdValue?: number | null; [field: string]: unknown };
 export type AgentLog = { id: number; ts: string; latency_ms: number; request_json: Record<string, unknown>; response_json: Record<string, unknown>; intended: boolean; executed: boolean; reason: string };
-export type MarketTicker = { lastPrice?: string; price24hPcnt?: string; highPrice24h?: string; lowPrice24h?: string; turnover24h?: string };
+export type MarketTicker = {
+  lastPrice?: string;
+  price24hPcnt?: string;
+  highPrice24h?: string;
+  lowPrice24h?: string;
+  turnover24h?: string;
+  volume24h?: string;
+  openPrice?: string;
+  prevPrice24h?: string;
+  indexPrice?: string;
+  usdIndexPrice?: string;
+  markPrice?: string;
+  bid1Price?: string;
+  ask1Price?: string;
+  bid1Size?: string;
+  ask1Size?: string;
+  [field: string]: string | number | undefined;
+};
 export type MarketCandle = { ts: number; close: number; open: number; high: number; low: number; volume: number };
+export type MarketBook = {
+  bid?: number;
+  ask?: number;
+  spread_bps?: number;
+  mid?: number;
+  bid_depth_usdt_l1?: number;
+  ask_depth_usdt_l1?: number;
+  bid_depth_usdt_l10?: number;
+  ask_depth_usdt_l10?: number;
+  book_imbalance?: number;
+  [field: string]: number | string | undefined;
+};
 
 export function subscribeMarketPrices(
   symbols: string[],
@@ -136,6 +165,7 @@ export const api = {
   stopAgent: () => request('/agent/stop', { method: 'POST' }),
   getCandles: (symbol: string, tf: string) => request<{ candles: MarketCandle[] }>(`/markets/${symbol}/candles?tf=${tf}`),
   getIndicators: (symbol: string, tf: string) => request<{ indicators: Record<string, number> }>(`/markets/${symbol}/indicators?tf=${tf}`),
+  getBook: (symbol: string) => request<{ symbol: string; book: MarketBook }>(`/markets/${symbol}/book`),
   getMarkets: () => request<{ symbols: string[] }>('/markets'),
   getPortfolio: () => request<Portfolio>('/portfolio'),
   getBrokerStatus: () => request<BrokerStatus>('/broker/status'),
