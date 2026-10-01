@@ -146,8 +146,8 @@ async function request<T>(path: string, init?: RequestInit, retry = true): Promi
 }
 
 export const api = {
-  signUp: (email: string) => request('/auth/signup', { method: 'POST', body: JSON.stringify({ email }) }),
-  signIn: (email: string) => request('/auth/signin', { method: 'POST', body: JSON.stringify({ email }) }),
+  signUp: (email: string) => request('/auth/signup', { method: 'POST', body: JSON.stringify({ email, mobile_app: Platform.OS !== 'web' }) }),
+  signIn: (email: string) => request('/auth/signin', { method: 'POST', body: JSON.stringify({ email, mobile_app: Platform.OS !== 'web' }) }),
   refresh: (refreshToken: string) => request<{ access_token: string; refresh_token: string }>('/auth/refresh', { method: 'POST', body: JSON.stringify({ refresh_token: refreshToken }) }),
   getSession: () => request<Session>('/auth/session'),
   getProfile: () => request<Profile>('/me'),

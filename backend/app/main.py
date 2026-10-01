@@ -62,6 +62,7 @@ class BybitConnectRequest(BaseModel):
 
 class AuthEmail(BaseModel):
     email: str
+    mobile_app: bool = False
 
 
 class AuthRefreshRequest(BaseModel):
@@ -428,13 +429,18 @@ def _get_supabase_url() -> str:
     return supabase_url
 
 
-async def _supabase_auth_request(path: str, body: dict[str, str | bool]) -> Response:
+async def _supabase_auth_request(
+    path: str,
+    body: dict[str, str | bool],
+    params: dict[str, str] | None = None,
+) -> Response:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.post(
                 f"{_get_supabase_url()}/auth/v1/{path}",
                 headers={"apikey": os.environ["SUPABASE_PUBLISHABLE_KEY"]},
                 json=body,
+                params=params,
             )
     except httpx.HTTPError as error:
         raise HTTPException(status_code=503, detail="Supabase Auth is unavailable") from error
@@ -454,12 +460,27 @@ async def _supabase_auth_request(path: str, body: dict[str, str | bool]) -> Resp
 
 @app.post("/auth/signup")
 async def auth_signup(body: AuthEmail) -> Response:
-    return await _supabase_auth_request("otp", {"email": body.email, "create_user": True})
+    params = _mobile_auth_redirect_params(body)
+    return await _supabase_auth_request(
+        "otp", {"email": body.email, "create_user": True}, params
+    )
 
 
 @app.post("/auth/signin")
 async def auth_signin(body: AuthEmail) -> Response:
-    return await _supabase_auth_request("otp", {"email": body.email, "create_user": False})
+    params = _mobile_auth_redirect_params(body)
+    return await _supabase_auth_request(
+        "otp", {"email": body.email, "create_user": False}, params
+    )
+
+
+def _mobile_auth_redirect_params(body: AuthEmail) -> dict[str, str] | None:
+    if not body.mobile_app:
+        return None
+    redirect_url = os.environ.get("SUPABASE_AUTH_REDIRECT_URL", "").strip()
+    if not redirect_url:
+        raise HTTPException(status_code=503, detail="Mobile auth redirect is not configured")
+    return {"redirect_to": redirect_url}
 
 
 @app.post("/auth/refresh")

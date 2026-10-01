@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
+import { Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -32,19 +33,16 @@ export default function TabLayout() {
   });
   const segments = useSegments();
   const routeName = segments[0] ?? '';
-  const routerPathname = usePathname();
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : routerPathname;
+  const pathname = usePathname();
   const isPublicPath = ['/welcome', '/sign-in', '/sign-up', '/check-email'].includes(pathname);
   const [hasSession, setHasSession] = useState<boolean | null>(null);
 
   useEffect(() => {
     let active = true;
-    const browserUrl = typeof window !== 'undefined' ? window.location.href : null;
-    Promise.resolve(browserUrl ?? Linking.getInitialURL())
-      .then(storeMagicLinkFromUrl)
-      .then(() => Promise.all([getAccessToken(), getRefreshToken()]))
-      .then(async ([accessToken, refreshToken]) => {
-        if (!active) return;
+    const loadSession = async (url: string | null) => {
+      try {
+        await storeMagicLinkFromUrl(url);
+        const [accessToken, refreshToken] = await Promise.all([getAccessToken(), getRefreshToken()]);
         let validSession = Boolean(accessToken && refreshToken);
         if (validSession) {
           try {
@@ -56,18 +54,26 @@ export default function TabLayout() {
         }
         if (!active) return;
         setHasSession(validSession);
-      })
-      .catch(async () => {
-        if (!active) return;
+      } catch {
         await clearTokens().catch(() => {});
         if (!active) return;
         setHasSession(false);
-      });
+      }
+    };
+
+    const initialUrl = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? Promise.resolve(window.location.href)
+      : Linking.getInitialURL();
+    void initialUrl.then(loadSession);
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void loadSession(url);
+    });
 
     return () => {
       active = false;
+      subscription.remove();
     };
-  }, [routeName]);
+  }, []);
 
   useEffect(() => {
     if (hasSession === false && !isPublicPath) {
