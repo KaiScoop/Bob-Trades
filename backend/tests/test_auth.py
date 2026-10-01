@@ -17,6 +17,7 @@ class StubAuthClient:
         self.request_headers = None
         self.request_url = None
         self.request_json = None
+        self.request_params = None
 
     async def __aenter__(self):
         return self
@@ -29,10 +30,11 @@ class StubAuthClient:
         self.request_headers = headers
         return self.response
 
-    async def post(self, url, headers, json):
+    async def post(self, url, headers, json, params=None):
         self.request_url = url
         self.request_headers = headers
         self.request_json = json
+        self.request_params = params
         return self.response
 
 
@@ -98,6 +100,23 @@ def test_signup_and_signin_request_email_magic_links_from_supabase(monkeypatch):
     assert stub.request_url == "https://project.supabase.co/auth/v1/otp"
     assert stub.request_json == {"email": email["email"], "create_user": False}
     assert signin.json() == {"message_id": "message-123"}
+
+
+def test_native_magic_links_use_configured_app_redirect(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
+    monkeypatch.setenv("SUPABASE_AUTH_REDIRECT_URL", "frontend://")
+    stub = StubAuthClient(httpx.Response(200, json={"message_id": "message-123"}))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: stub)
+
+    response = TestClient(app).post(
+        "/auth/signin",
+        json={"email": "user@example.com", "mobile_app": True},
+    )
+
+    assert response.status_code == 200
+    assert stub.request_params == {"redirect_to": "frontend://"}
+    assert stub.request_json == {"email": "user@example.com", "create_user": False}
 
 
 def test_auth_refresh_exchanges_refresh_token_with_supabase(monkeypatch):

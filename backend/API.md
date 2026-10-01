@@ -19,6 +19,10 @@ Supabase Auth owns the user accounts and issues the access tokens. Create
 accounts with `POST /auth/signup` and authenticate with `POST /auth/signin`.
 Send the resulting access token on every protected request:
 
+Native clients send `mobile_app: true` with the email request. Configure
+`SUPABASE_AUTH_REDIRECT_URL` on the backend and add the same URI to Supabase
+Auth's allowed redirect URLs. The Expo app currently uses `frontend://`.
+
 ```http
 Authorization: Bearer <supabase-access-token>
 ```
