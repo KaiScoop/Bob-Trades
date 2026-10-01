@@ -676,10 +676,19 @@ def test_testnet_agent_start_and_stop_persist_settings(monkeypatch):
     assert storage_tables["agent_settings"][0]["agent_on"] is True
     assert storage_tables["agent_settings"][0]["risk_profile"] == "balanced"
 
+    status = client.get("/agent/status", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["running"] is True
+    assert status.json()["symbol"] == "BTCUSDT"
+
     stop = client.post("/agent/stop", headers=headers)
     assert stop.status_code == 200
     assert storage_tables["agent_settings"][0]["agent_on"] is False
     assert storage_tables["agent_settings"][0]["armed"] is False
+
+    status_after_stop = client.get("/agent/status", headers=headers)
+    assert status_after_stop.status_code == 200
+    assert status_after_stop.json()["running"] is False
 
 
 def test_global_kill_switch_requires_admin_and_arms_upstash(monkeypatch):

@@ -11,6 +11,14 @@ import { MarketChart } from '@/components/market-chart';
 import { useLiveMarketChart } from '@/hooks/use-live-market-chart';
 
 const RISKS = ['low', 'medium', 'high'];
+const normalizeRisk = (value: string | null | undefined) => {
+  const next = value?.toLowerCase();
+  if (next === 'conservative' || next === 'low') return 'low';
+  if (next === 'aggressive' || next === 'high') return 'high';
+  if (next === 'balanced' || next === 'medium') return 'medium';
+  return 'medium';
+};
+
 export default function TradeScreen() {
   const { symbol: symbolParam } = useLocalSearchParams<{ symbol?: string }>();
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -32,25 +40,70 @@ export default function TradeScreen() {
   }, [symbolParam]);
 
   useEffect(() => {
-    api.getMarkets()
-      .then((result) => {
-        setSymbols(result.symbols);
-        if (result.symbols[0]) setSymbol(result.symbols[0]);
+    let active = true;
+    Promise.all([
+      api.getMarkets(),
+      api.getAgentStatus(),
+    ])
+      .then(([markets, status]) => {
+        if (!active) return;
+        setSymbols(markets.symbols);
+        if (status.symbol) setSymbol(status.symbol);
+        else if (markets.symbols[0]) setSymbol(markets.symbols[0]);
+        setRunning(Boolean(status.running));
+        setRisk(normalizeRisk(status.risk));
+        if (typeof status.max_position_pct === 'number') {
+          setCapitalPct(Math.min(100, Math.max(1, Math.round(status.max_position_pct * 100))));
+        }
       })
-      .finally(() => setBusy(false));
+      .catch(() => {
+        if (!active) return;
+        setRunning(false);
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
     api.getIndicators(symbol, timeframe).then((result) => setIndicators(result.indicators)).catch(() => setIndicators({}));
   }, [symbol, timeframe]);
 
-  const start = () => {
-    setMessage('');
-    api.startAgent({ symbol, risk, max_position_pct: capitalPct / 100, arm_live: false })
-      .then(() => { setRunning(true); setMessage('Bob is running.'); })
-      .catch(() => setMessage('Connect Bybit before starting Bob.'));
+  const syncStatus = async () => {
+    try {
+      const status = await api.getAgentStatus();
+      setRunning(Boolean(status.running));
+      if (status.symbol) setSymbol(status.symbol);
+      setRisk(normalizeRisk(status.risk));
+      if (typeof status.max_position_pct === 'number') {
+        setCapitalPct(Math.min(100, Math.max(1, Math.round(status.max_position_pct * 100))));
+      }
+    } catch {
+      setRunning(false);
+    }
   };
-  const stop = () => api.stopAgent().then(() => { setRunning(false); setMessage('Bob stopped.'); });
+
+  const start = async () => {
+    setMessage('');
+    try {
+      await api.startAgent({ symbol, risk, max_position_pct: capitalPct / 100, arm_live: false });
+      await syncStatus();
+      setMessage('Bob is running.');
+    } catch {
+      setMessage('Connect Bybit before starting Bob.');
+    }
+  };
+  const stop = async () => {
+    try {
+      await api.stopAgent();
+      await syncStatus();
+      setMessage('Bob stopped.');
+    } catch {
+      setMessage('Could not stop Bob right now.');
+    }
+  };
   const livePrice = Number(ticker?.lastPrice);
 
   return (
