@@ -21,6 +21,7 @@ export type Session = { user_id: string; email: string };
 export type Profile = { user_id: string; username: string | null; dob: string | null; avatar_url: string | null };
 export type Position = { symbol: string; side: string; size: number; free?: number; locked?: number; usdValue?: number | null; [field: string]: unknown };
 export type AgentLog = { id: number; ts: string; latency_ms: number; request_json: Record<string, unknown>; response_json: Record<string, unknown>; intended: boolean; executed: boolean; reason: string };
+export type AgentStatus = { status: string; running: boolean; symbol: string | null; risk: string | null; max_position_pct: number | null; mode: string | null; armed: boolean; updated_at: string | null };
 export type MarketTicker = {
   lastPrice?: string;
   price24hPcnt?: string;
@@ -161,6 +162,7 @@ export const api = {
   closePosition: (symbol: string) => request(`/positions/${symbol}/close`, { method: 'POST' }),
   updateTpsl: (symbol: string, tp: number, sl: number) => request(`/positions/${symbol}/tpsl`, { method: 'POST', body: JSON.stringify({ tp, sl }) }),
   getLogs: (limit = 50) => request<{ logs: AgentLog[] }>(`/agent/logs?limit=${limit}`),
+  getAgentStatus: () => request<AgentStatus>('/agent/status'),
   startAgent: (payload: { symbol: string; risk: string; max_position_pct: number; arm_live: boolean }) => request('/agent/start', { method: 'POST', body: JSON.stringify(payload) }),
   stopAgent: () => request('/agent/stop', { method: 'POST' }),
   getCandles: (symbol: string, tf: string) => request<{ candles: MarketCandle[] }>(`/markets/${symbol}/candles?tf=${tf}`),
