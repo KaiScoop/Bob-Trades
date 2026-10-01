@@ -907,6 +907,48 @@ def stop_agent(
     return {"status": "stopped"}
 
 
+@app.get("/agent/status")
+def get_agent_status(
+    user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> dict[str, Any]:
+    connection = None
+    try:
+        connection = _load_broker_connection(user)
+    except HTTPException:
+        connection = None
+
+    response = _supabase_request(
+        user,
+        "GET",
+        f"agent_settings?user_id=eq.{user.id}&select=user_id,symbol,risk_profile,max_position_pct,agent_on,armed,updated_at&limit=1",
+        headers={"Accept": "application/json"},
+    )
+    rows = response.json()
+    if not isinstance(rows, list) or not rows:
+        return {
+            "status": "stopped",
+            "running": False,
+            "symbol": None,
+            "risk": None,
+            "max_position_pct": None,
+            "mode": connection["mode"] if connection else None,
+            "armed": False,
+            "updated_at": None,
+        }
+
+    settings = rows[0]
+    return {
+        "status": "running" if settings.get("agent_on") else "stopped",
+        "running": bool(settings.get("agent_on", False)),
+        "symbol": settings.get("symbol"),
+        "risk": settings.get("risk_profile"),
+        "max_position_pct": settings.get("max_position_pct"),
+        "mode": connection["mode"] if connection else None,
+        "armed": bool(settings.get("armed", False)),
+        "updated_at": settings.get("updated_at"),
+    }
+
+
 @app.get("/agent/logs")
 def get_agent_logs(
     user: AuthenticatedUser = Depends(get_authenticated_user),
